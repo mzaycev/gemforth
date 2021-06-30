@@ -1,7 +1,8 @@
 CC=cc
 SRC=main.c forth.c
-EXE=forth.exe
-VMEXE=forthvm.exe
+EXESUFFIX=.exe
+EXE=forth$(EXESUFFIX)
+VMEXE=forthvm$(EXESUFFIX)
 
 all: $(EXE) $(VMEXE)
 
@@ -23,3 +24,9 @@ release: $(SRC) forth.h
 
 clean:
 	rm -f $(EXE) $(VMEXE)
+
+work_blob:
+	7za a blobs/newforth_`date +%Y%m%d`w.zip $(SRC) forth.h $(EXE) $(VMEXE) Makefile README.txt internals.txt
+
+home_blob:
+	7za a blobs/newforth_`date +%Y%m%d`h.zip $(SRC) forth.h $(EXE) $(VMEXE) Makefile README.txt internals.txt
