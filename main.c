@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <conio.h>
 #include <time.h>
+#include <sys/stat.h>
 
 #include "forth.h"
 
@@ -14,7 +14,7 @@ enum app_codes {
 	DOTX,
 	EMIT,
 	PRINT,
-	KEY,
+	CR,
 	CLOCK,
 	DOTQUOTE,
 	
@@ -40,8 +40,8 @@ void app_primitives(int prim)
 		case PRINT:
 			printf("%s", fth_area(fth_pop(), 1));
 			break;
-		case KEY:
-			fth_push(getch());
+		case CR:
+			putchar('\n');
 			break;
 		case CLOCK:
 			fth_push(clock());
@@ -67,7 +67,7 @@ primitive_word_t app_words[] = {
 	{".X",			DOTX,		0},
 	{"EMIT",		EMIT,		0},
 	{"PRINT",		PRINT,		0},
-	{"KEY",			KEY,		0},
+	{"CR",			CR,		0},
 	{"CLOCK",		CLOCK,		0},
 	{".\"",			DOTQUOTE,	1},
 	
@@ -84,6 +84,67 @@ int main(int argc, char *argv[])
 	fth_init(app_primitives, &err);
 #ifndef FORTH_ONLY_VM
 	fth_library(app_words);
+	
+	if (argc > 1) {
+		FILE *f;
+		struct stat st;
+		char *source;
+		int read;
+		
+		if (stat(argv[1], &st) != 0) {
+			perror(argv[1]);
+			return 1;
+		}
+		
+		source = malloc(st.st_size + 1);
+		if (!source) {
+			perror("Unable to allocate memory for file contents");
+			return 1;
+		}
+		
+		f = fopen(argv[1], "r");
+		if (!f) {
+			perror(argv[1]);
+			free(source);
+			return 1;
+		}
+		
+		read = fread(source, 1, st.st_size, f);
+		fclose(f);
+		source[read] = 0;
+		
+		if (setjmp(err) == 0) {
+			fth_interpret(source);
+			free(source);
+			return 0;
+		} else {
+			int lineno, linelen, intp, i;
+			const char *errline;
+			
+			fprintf(stderr, "Error: %s\n", fth_geterror());
+			errline = fth_geterrorline(&linelen, &intp, &lineno);
+			fprintf(stderr, "%s:%d\n", argv[1], lineno);
+			fprintf(stderr, "%.*s\n", linelen, errline);
+			fprintf(stderr, "%*s\n", intp + 1, "^");
+			
+			if (fth_gettracedepth() > 0) {
+				fprintf(stderr, "Traceback:\n");
+				for (i = fth_gettracedepth() - 1; i >= 0; i--) {
+					fprintf(stderr, "\t%s\n", fth_gettrace(i));
+				}
+			}
+			
+			fprintf(stderr, "Stack: ");
+			for (i = 0; i < fth_getdepth(); i++)
+				fprintf(stderr, "%d ", fth_getstack(i));
+			if (i == 0)
+				fprintf(stderr, "empty");
+			fprintf(stderr, "\n");
+			
+			fth_reset();
+			free(source);
+		}
+	}
 	
 	while (fgets(tib, 256, stdin))
 		if (strlen(tib) > 1) {
