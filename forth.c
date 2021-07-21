@@ -34,9 +34,6 @@
 #endif
 
 // dictionary
-#ifndef FORTH_ONLY_VM
-#  define WORDAT(a)	((word_t *)&dict[(a)])
-#endif
 
 // flags
 #ifndef FORTH_ONLY_VM
@@ -61,8 +58,8 @@
 typedef struct word {
 	int link;
 	int xt;
+	int name;
 	char flags;
-	char name[];
 } word_t;
 #endif
 
@@ -191,6 +188,7 @@ enum core_codes {
 	BLOCKSTART,
 	BLOCKEND,
 	LENCODE,
+	LENDICT,
 	LENNAMES,
 	
 	// parsing, strings and tools
@@ -327,6 +325,7 @@ primitive_word_t core_words[] = {
 	{"{",			BLOCKSTART,		0},
 	{"}",			BLOCKEND,		1},
 	{"#CODE",		LENCODE,		0},
+	{"#DICT",		LENDICT,		0},
 	{"#NAMES",		LENNAMES,		0},
 	
 	// parsing, strings and tools
@@ -406,11 +405,15 @@ int cp;
 char data[DATA_SIZE + 1];	// with trailing 0
 int dp;
 
-// dictionary area
 #ifndef FORTH_ONLY_VM
-char dict[DICT_SIZE];
+// dictionary area
+word_t dict[DICT_SIZE];
 int dictp;
 int context, current, forth_voc;
+
+// names area
+char names[NAMES_SIZE];
+int namesp;
 #endif
 
 // state
@@ -598,19 +601,21 @@ static void execute(int xt)
 #ifndef FORTH_ONLY_VM
 static void create(const char *name, int flags, int prim)
 {
-	word_t *w;
-	int size = sizeof(word_t) + strlen(name) + 1;
+	int name_size = strlen(name) + 1;
 	
-	check(dictp + size >= DICT_SIZE,
+	check(dictp >= DICT_SIZE - 1,
 		"dictionary overflow while creating %s", name);
-	w = WORDAT(dictp);
-	w->link = code[current];
+	check(namesp + name_size >= NAMES_SIZE,
+		"name area overflow while creating %s", name);
+	dict[dictp].link = code[current];
 	code[current] = dictp;
-	w->flags = flags;
-	w->xt = cp;
+	dict[dictp].flags = flags;
+	dict[dictp].xt = cp;
 	compile(prim);
-	strcpy(w->name, name);
-	dictp += size;
+	dict[dictp].name = namesp;
+	strcpy(&names[namesp], name);
+	namesp += name_size;
+	dictp++;
 }
 
 
@@ -684,9 +689,9 @@ static word_t *find(const char *word)
 	int voc = context;	// pfa of vocabulary
 	
 	do {
-		for (p = code[voc]; p; p = WORDAT(p)->link)
-			if (!ISSET(WORDAT(p)->flags, SMUDGED) && strcasecmp(WORDAT(p)->name, word) == 0)
-				return WORDAT(p);
+		for (p = code[voc]; p; p = dict[p].link)
+			if (!ISSET(dict[p].flags, SMUDGED) && strcasecmp(&names[dict[p].name], word) == 0)
+				return &dict[p];
 		voc = code[voc + 1];
 	} while (voc);
 	
@@ -696,9 +701,9 @@ static word_t *find(const char *word)
 	
 	voc = current;
 	do {
-		for (p = code[voc]; p; p = WORDAT(p)->link)
-			if (!ISSET(WORDAT(p)->flags, SMUDGED) && strcasecmp(WORDAT(p)->name, word) == 0)
-				return WORDAT(p);
+		for (p = code[voc]; p; p = dict[p].link)
+			if (!ISSET(dict[p].flags, SMUDGED) && strcasecmp(&names[dict[p].name], word) == 0)
+				return &dict[p];
 		voc = code[voc + 1];
 	} while (voc);
 	//*/
@@ -956,7 +961,7 @@ static void core_prims(int prim, int pfa)
 			check(state == 0, "; is used outside any definition");
 			check(cfsp > 0, "unbalanced control structure");
 			compile(exit_xt);
-			CLR(WORDAT(code[current])->flags, SMUDGED);
+			CLR(dict[code[current]].flags, SMUDGED);
 			state = 0;
 			break;
 #endif
@@ -1274,13 +1279,13 @@ static void core_prims(int prim, int pfa)
 			compile(0);			// xt of DOES>-part
 			break;
 		case DOES:
-			check(code[WORDAT(code[current])->xt] != DOVARIABLE, "%s is not CREATEd", WORDAT(code[current])->name);
-			code[WORDAT(code[current])->xt] = DODOES;
+			check(code[dict[code[current]].xt] != DOVARIABLE, "%s is not CREATEd", &names[dict[code[current]].name]);
+			code[dict[code[current]].xt] = DODOES;
 			if (running) {
-				code[WORDAT(code[current])->xt + 2] = ip;
+				code[dict[code[current]].xt + 2] = ip;
 				rpop();
 			} else {
-				code[WORDAT(code[current])->xt + 2] = cp;
+				code[dict[code[current]].xt + 2] = cp;
 				state = FORTH_BOOL(1);
 			}
 			break;
@@ -1383,7 +1388,7 @@ static void core_prims(int prim, int pfa)
 			compile(w->xt);
 			} break;
 		case MAKEIMMEDIATE:
-			SET(WORDAT(code[current])->flags, IMMEDIATE);
+			SET(dict[code[current]].flags, IMMEDIATE);
 			break;
 		case STATE:
 			push(FORTH_BOOL(state));
@@ -1411,8 +1416,11 @@ static void core_prims(int prim, int pfa)
 			push(cp);
 			break;
 #ifndef FORTH_ONLY_VM
-		case LENNAMES:
+		case LENDICT:
 			push(dictp);
+			break;
+		case LENNAMES:
+			push(namesp);
 			break;
 #endif
 		
@@ -1603,6 +1611,7 @@ void fth_init(primitives_f app_primitives, jmp_buf *errhandler)
 	
 	// initial vocabulary
 #ifndef FORTH_ONLY_VM
+	namesp = 0;
 	dictp = 1;
 	context = current = 0;
 	code[0] = 0;
@@ -1761,9 +1770,9 @@ const char *fth_gettrace(int idx)
 	
 	voc = context;
 	do {
-		for (pw = code[voc]; pw; pw = WORDAT(pw)->link)
-			if (WORDAT(pw)->xt == xt)
-				return WORDAT(pw)->name;
+		for (pw = code[voc]; pw; pw = dict[pw].link)
+			if (dict[pw].xt == xt)
+				return &names[dict[pw].name];
 		voc = code[voc + 1];
 	} while (voc);
 	
@@ -1785,7 +1794,9 @@ void fth_savesystem(const char *fname)
 	check(fwrite(&dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	check(fwrite(data, 1, dp, f) < dp, "save error: %s", strerror(errno));
 	check(fwrite(&dictp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(dict, 1, dictp, f) < dictp, "save error: %s", strerror(errno));
+	check(fwrite(dict, sizeof(word_t), dictp, f) < dictp, "save error: %s", strerror(errno));
+	check(fwrite(&namesp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(names, 1, namesp, f) < namesp, "save error: %s", strerror(errno));
 	check(fwrite(&forth_voc, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	
 	check(fwrite(&lit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
@@ -1823,8 +1834,11 @@ void fth_loadsystem(const char *fname)
 	check(dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", dp, DATA_SIZE);
 	check(fread(data, 1, dp, f) < dp, "load error: %s", strerror(errno));
 	check(fread(&dictp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(dictp > DICT_SIZE, "saved dictionary (%d B) is larger than dictionary area (%d B)", dictp, DICT_SIZE);
-	check(fread(dict, 1, dictp, f) < dictp, "load error: %s", strerror(errno));
+	check(dictp > DICT_SIZE, "saved dictionary (%d words) is larger than dictionary area (%d B)", dictp, DICT_SIZE);
+	check(fread(dict, sizeof(word_t), dictp, f) < dictp, "load error: %s", strerror(errno));
+	check(fread(&namesp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(namesp > NAMES_SIZE, "saved word names (%d B) is larger than names area (%d B)", namesp, NAMES_SIZE);
+	check(fread(names, 1, namesp, f) < namesp, "load error: %s", strerror(errno));
 	check(fread(&forth_voc, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
 	check(fread(&lit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));

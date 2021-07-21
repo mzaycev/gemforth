@@ -17,11 +17,12 @@
 #define RSTACK_SIZE	32
 #define LSTACK_SIZE	16
 #define CFSTACK_SIZE	16
-#define CODE_SIZE	32768
-#define DATA_SIZE	32768
+#define CODE_SIZE	32768			// cells
+#define DATA_SIZE	32768			// bytes
 #ifndef FORTH_ONLY_VM
-#  define DICT_SIZE	32768
-#  define WORD_MAX	32
+#  define DICT_SIZE	1024			// words
+#  define NAMES_SIZE	8192			// bytes
+#  define WORD_MAX	32			// bytes
 #endif
 
 
