@@ -79,9 +79,8 @@ primitive_word_t app_words[] = {
 int main(int argc, char *argv[])
 {
 	char tib[256];
-	jmp_buf err;
 	
-	fth_init(app_primitives, &err);
+	fth_init(app_primitives);
 #ifndef FORTH_ONLY_VM
 	fth_library(app_words);
 	
@@ -113,8 +112,7 @@ int main(int argc, char *argv[])
 		fclose(f);
 		source[read] = 0;
 		
-		if (setjmp(err) == 0) {
-			fth_interpret(source);
+		if (fth_interpret(source)) {
 			free(source);
 			return 0;
 		} else {
@@ -148,8 +146,7 @@ int main(int argc, char *argv[])
 	
 	while (fgets(tib, 256, stdin))
 		if (strlen(tib) > 1) {
-			if (setjmp(err) == 0) {
-				fth_interpret(tib);
+			if (fth_interpret(tib)) {
 				if (!fth_getstate())
 					printf(" OK\n");
 			} else {
@@ -185,9 +182,7 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 	
-	if (setjmp(err) == 0) {
-		fth_runprogram(argv[1]);
-	} else {
+	if (!fth_runprogram(argv[1])) {
 		int i;
 		
 		fprintf(stderr, "%s\n", fth_geterror());
@@ -201,3 +196,4 @@ int main(int argc, char *argv[])
 	
 	return 0;
 }
+

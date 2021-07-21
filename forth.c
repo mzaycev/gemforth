@@ -2,6 +2,12 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <setjmp.h>
+#include <stdlib.h>
+
+#ifndef FORTH_NO_SAVES
+#  include <stdio.h>
+#endif
 
 #include "forth.h"
 
@@ -392,7 +398,8 @@ int cfsp;
 
 // error handling
 char errormsg[ERROR_MAX];
-jmp_buf *errjmp;
+jmp_buf errjmp;
+int errhandlers;
 
 // app-specific primitives handler
 primitives_f app_prims;
@@ -977,12 +984,14 @@ static void core_prims(int prim, int pfa)
 			const char *osource = source;
 			int ointp = intp, ostate = state;
 #endif
-			memcpy(ojmp, *errjmp, sizeof(jmp_buf));
-			if (setjmp(*errjmp) == 0) {
+			memcpy(ojmp, errjmp, sizeof(jmp_buf));
+			errhandlers++;
+			if (setjmp(errjmp) == 0) {
 				int xt = code[ip++];
 				checkcode(xt);
 				execute(xt);
-				memcpy(*errjmp, ojmp, sizeof(jmp_buf));
+				memcpy(errjmp, ojmp, sizeof(jmp_buf));
+				errhandlers--;
 				push(~0);
 			} else {
 				sp = osp, rsp = orsp, lsp = olsp, ip = oip, running = orunning;
@@ -992,7 +1001,8 @@ static void core_prims(int prim, int pfa)
 				source = osource;
 				intp = ointp, state = ostate;
 #endif
-				memcpy(*errjmp, ojmp, sizeof(jmp_buf));
+				memcpy(errjmp, ojmp, sizeof(jmp_buf));
+				errhandlers--;
 				push(0);
 			}
 			} break;
@@ -1011,11 +1021,13 @@ static void core_prims(int prim, int pfa)
 				int osp = sp, orsp = rsp, olsp = lsp, oip = ip, orunning = running;
 				const char *osource = source;
 				int ointp = intp, ostate = state;
-				memcpy(ojmp, *errjmp, sizeof(jmp_buf));
-				if (setjmp(*errjmp) == 0) {
+				memcpy(ojmp, errjmp, sizeof(jmp_buf));
+				errhandlers++;
+				if (setjmp(errjmp) == 0) {
 					checkcode(w->xt);
 					execute(w->xt);
-					memcpy(*errjmp, ojmp, sizeof(jmp_buf));
+					memcpy(errjmp, ojmp, sizeof(jmp_buf));
+					errhandlers--;
 					push(~0);
 				} else {
 					sp = osp, rsp = orsp, lsp = olsp, ip = oip, running = orunning;
@@ -1023,7 +1035,8 @@ static void core_prims(int prim, int pfa)
 						ip++;
 					source = osource;
 					intp = ointp, state = ostate;
-					memcpy(*errjmp, ojmp, sizeof(jmp_buf));
+					memcpy(errjmp, ojmp, sizeof(jmp_buf));
+					errhandlers--;
 					push(0);
 				}
 			}
@@ -1548,7 +1561,10 @@ void fth_error(const char *fmt, ...)
 		va_end(args);
 	}
 	
-	longjmp(*errjmp, 1);
+	if (errhandlers)
+		longjmp(errjmp, 1);
+	else
+		abort();
 }
 
 
@@ -1601,13 +1617,13 @@ char *fth_area(int a, int size)
 }
 
 
-void fth_init(primitives_f app_primitives, jmp_buf *errhandler)
+void fth_init(primitives_f app_primitives)
 {
 	app_prims = app_primitives;
-	errjmp = errhandler;
 	data[DATA_SIZE] = '\0';
 	reset();
 	cp = dp = 1;		// 0 is an "invalid" address
+	errhandlers = 0;
 	
 	// initial vocabulary
 #ifndef FORTH_ONLY_VM
@@ -1646,23 +1662,51 @@ void fth_primitive(const char *name, int code, int immediate)
 }
 
 
-void fth_interpret(const char *s)
+int fth_interpret(const char *s)
 {
 	const char *osource = source;
 	int ointp = intp;
-	source = s;
-	intp = 0;
-	do_interpret();
-	intp = ointp;
-	source = osource;
+	jmp_buf oerr;
+	int ret;
+	
+	memcpy(oerr, errjmp, sizeof(jmp_buf));
+	errhandlers++;
+	if (setjmp(errjmp) == 0) {
+		source = s;
+		intp = 0;
+		do_interpret();
+		ret = 1;
+		intp = ointp;
+		source = osource;
+	} else {
+		ret = 0;
+	}
+	memcpy(errjmp, oerr, sizeof(jmp_buf));
+	errhandlers--;
+	return ret;
 }
 
 
-void fth_execute(const char *w)
+int fth_execute(const char *w)
 {
-	word_t *pw = find(w);
-	check(pw == NULL, "%s ?", w);
-	execute(pw->xt);
+	word_t *pw;
+	jmp_buf oerr;
+	int ret;
+	
+	memcpy(oerr, errjmp, sizeof(jmp_buf));
+	errhandlers++;
+	if (setjmp(errjmp) == 0) {
+		pw = find(w);
+		check(pw == NULL, "%s ?", w);
+		execute(pw->xt);
+		ret = 1;
+	} else {
+		ret = 0;
+	}
+	
+	memcpy(errjmp, oerr, sizeof(jmp_buf));
+	errhandlers--;
+	return ret;
 }
 
 
@@ -1687,6 +1731,7 @@ void fth_reset(void)
 	sp = rsp = lsp = cfsp = 0;
 	running = 0;
 	errormsg[0] = 0;
+	errhandlers = 0;
 #ifndef FORTH_ONLY_VM
 	state = 0;
 	context = current = forth_voc;
@@ -1869,11 +1914,13 @@ void fth_saveprogram(const char *fname, const char *entry)
 
 
 #ifndef FORTH_NO_SAVES
-void fth_runprogram(const char *fname)
+int fth_runprogram(const char *fname)
 {
 	char sig[4];
 	int entry;
 	FILE *f = fopen(fname, "rb");
+	jmp_buf oerr;
+	int ret;
 	
 	check(!f, "load error: %s", strerror(errno));
 	
@@ -1905,8 +1952,18 @@ void fth_runprogram(const char *fname)
 	fclose(f);
 	fth_reset();
 	
-	checkcode(entry);
-	execute(entry);
+	memcpy(oerr, errjmp, sizeof(jmp_buf));
+	errhandlers++;
+	if (setjmp(errjmp) == 0) {
+		checkcode(entry);
+		execute(entry);
+		ret = 1;
+	} else {
+		ret = 0;
+	}
+	memcpy(errjmp, oerr, sizeof(jmp_buf));
+	errhandlers--;
+	return ret;
 }
 
 

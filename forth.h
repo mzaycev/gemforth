@@ -2,10 +2,6 @@
 #define _FORTH_H_
 
 
-#include <setjmp.h>
-#include <stdio.h>
-
-
 // Settings
 // Uncomment to build Forth system without text interpreter and dictionary
 // #define FORTH_ONLY_VM	1
@@ -56,10 +52,10 @@ char fth_cfetch(int a);
 void fth_cstore(int a, char x);
 char *fth_area(int a, int size);
 
-void fth_init(primitives_f app_primitives, jmp_buf *errhandler);
+void fth_init(primitives_f app_primitives);
 #ifndef FORTH_ONLY_VM
-void fth_interpret(const char *s);
-void fth_execute(const char *w);
+int fth_interpret(const char *s);
+int fth_execute(const char *w);
 void fth_primitive(const char *name, int code, int immediate);
 void fth_library(primitive_word_t *lib);
 #endif
@@ -83,7 +79,7 @@ void fth_loadsystem(const char *fname);
 void fth_saveprogram(const char *fname, const char *entry);
 #  endif
 
-void fth_runprogram(const char *fname);
+int fth_runprogram(const char *fname);
 
 void fth_savedata(const char *fname);
 void fth_loaddata(const char *fname);
