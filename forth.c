@@ -2,7 +2,6 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <errno.h>
-#include <setjmp.h>
 #include <stdlib.h>
 
 #ifndef FORTH_NO_SAVES
@@ -22,6 +21,7 @@
 #define cfetch(a)	fth_cfetch(a)
 #define cstore(a, c)	fth_cstore((a), (c))
 #define reset()		fth_reset()
+#define F		forth
 
 // error handling
 #define error(...)	fth_error(__VA_ARGS__)
@@ -34,8 +34,8 @@
 
 // parsing
 #ifndef FORTH_ONLY_VM
-#  define SOURCELEFT	((intp) < strlen(source))
-#  define CURCHAR	(source[(intp)])
+#  define SOURCELEFT	(F.intp < strlen(F.source))
+#  define CURCHAR	(F.source[F.intp])
 #  define ISSEP(sep, c)	(((sep) == (c)) || ((sep) == ' ' && strchr(" \t\n\r", (c))))
 #endif
 
@@ -60,14 +60,6 @@
 
 // ================================= Types ====================================
 
-#ifndef FORTH_ONLY_VM
-typedef struct word {
-	int link;
-	int xt;
-	int name;
-	char flags;
-} word_t;
-#endif
 
 
 // ================================== Data ====================================
@@ -362,80 +354,7 @@ primitive_word_t core_words[] = {
 
 // ============================== Forth state =================================
 
-// data stack
-int stack[STACK_SIZE];
-int sp;
-
-// return stack
-struct {
-	int ip;
-	int xt;
-} rstack[RSTACK_SIZE];
-int rsp;
-
-// loop stack
-struct {
-	int index, limit;
-	int leave;
-	int xt;
-} lstack[LSTACK_SIZE];
-int lsp;
-
-// control flow stack
-struct {
-	enum cftype {
-		CFIF,
-		CFELSE,
-		CFTHEN,
-		CFBEGIN,
-		CFWHILE,
-		CFDO,
-		CFLOOP
-	} type;
-	int ref;
-} cfstack[CFSTACK_SIZE];
-int cfsp;
-
-// error handling
-char errormsg[ERROR_MAX];
-jmp_buf errjmp;
-int errhandlers;
-
-// app-specific primitives handler
-primitives_f app_prims;
-
-// code area
-int code[CODE_SIZE];
-int cp;
-
-// data area
-char data[DATA_SIZE + 1];	// with trailing 0
-int dp;
-
-#ifndef FORTH_ONLY_VM
-// dictionary area
-word_t dict[DICT_SIZE];
-int dictp;
-int context, current, forth_voc;
-
-// names area
-char names[NAMES_SIZE];
-int namesp;
-#endif
-
-// state
-int ip;
-int running;
-#ifndef FORTH_ONLY_VM
-int state;
-const char *source;
-int intp;
-char word[WORD_MAX];
-#endif
-
-// core xt
-int lit_xt, exit_xt, branch_xt, qbranch_xt, dodo_xt, doqdo_xt, doloop_xt, doaddloop_xt, codecomma_xt, store_xt, dotry_xt;
-
+forth_t F;
 
 // ============================== Prototypes ==================================
 
@@ -452,87 +371,88 @@ static int endian(void)
 
 static void rpush(void)
 {
-	check(rsp >= RSTACK_SIZE, "return stack overflow");
-	rstack[rsp].ip = ip;
-	rstack[rsp].xt = running;
-	rsp++;
+	check(F.rsp >= RSTACK_SIZE, "return stack overflow");
+	F.rstack[F.rsp].ip = F.ip;
+	F.rstack[F.rsp].xt = F.running;
+	F.rsp++;
 }
 
 
 static void rpop(void)
 {
-	check(rsp <= 0, "return stack underflow");
-	--rsp;
-	ip = rstack[rsp].ip;
-	running = rstack[rsp].xt;
+	check(F.rsp <= 0, "return stack underflow");
+	--F.rsp;
+	F.ip = F.rstack[F.rsp].ip;
+	F.running = F.rstack[F.rsp].xt;
 }
 
 
 static void lpush(int index, int limit, int leave)
 {
-	check(lsp >= LSTACK_SIZE, "loop stack overflow");
-	lstack[lsp].index = index;
-	lstack[lsp].limit = limit;
-	lstack[lsp].leave = leave;
-	lstack[lsp].xt = running;
-	lsp++;
+	check(F.lsp >= LSTACK_SIZE, "loop stack overflow");
+	F.lstack[F.lsp].index = index;
+	F.lstack[F.lsp].limit = limit;
+	F.lstack[F.lsp].leave = leave;
+	F.lstack[F.lsp].xt = F.running;
+	F.lsp++;
 }
 
 
 static void lpop(void)
 {
-	check(lsp <= 0, "loop stack underflow");
-	lsp--;
+	check(F.lsp <= 0, "loop stack underflow");
+	F.lsp--;
 }
 
 
 static void cfpush(enum cftype type, int ref)
 {
-	check(cfsp >= CFSTACK_SIZE, "too nested control structures");
-	cfstack[cfsp].type = type;
-	cfstack[cfsp].ref = ref;
-	cfsp++;
+	check(F.cfsp >= CFSTACK_SIZE, "too nested control structures");
+	F.cfstack[F.cfsp].type = type;
+	F.cfstack[F.cfsp].ref = ref;
+	F.cfsp++;
 }
 
 
 static int cfpop(enum cftype required)
 {
-	check(cfsp <= 0, "unbalanced control structure");
-	cfsp--;
-	check(cfstack[cfsp].type != required, "unbalanced control structure");
-	return cfstack[cfsp].ref;
+	check(F.cfsp <= 0, "unbalanced control structure");
+	F.cfsp--;
+	check(F.cfstack[F.cfsp].type != required, "unbalanced control structure");
+	return F.cfstack[F.cfsp].ref;
 }
 
 
 static enum cftype cfpeek(void)
 {
-	check(cfsp <= 0, "unbalanced control structure");
-	return cfstack[cfsp - 1].type;
+	check(F.cfsp <= 0, "unbalanced control structure");
+	return F.cfstack[F.cfsp - 1].type;
 }
 
 
 static void compile(int x)
 {
-	check(cp >= CODE_SIZE, "code area overflow");
-	code[cp++] = x;
+	check(F.cp >= CODE_SIZE, "code area overflow");
+	F.code[F.cp++] = x;
 }
 
 
 static void dcompile(int x)
 {
-	checkdata(dp, sizeof(int));
-	*(int *)&data[dp] = x;
-	dp += sizeof(int);
+	checkdata(F.dp, sizeof(int));
+	*(int *)&F.data[F.dp] = x;
+	F.dp += sizeof(int);
 }
 
 
 static void ccompile(int c)
 {
-	checkdata(dp, 1);
-	data[dp++] = c;
+	checkdata(F.dp, 1);
+	F.data[F.dp++] = c;
 }
 
 
+#ifndef FORTH_ONLY_VM
 static void scompile(const char *s, int size)
 {
 	int escape = 0;
@@ -588,18 +508,19 @@ static void scompile(const char *s, int size)
 	}
 	ccompile('\0');
 }
+#endif
 
 
 static void execute(int xt)
 {
-	int prim = code[xt];
-	int orsp = rsp;
+	int prim = F.code[xt];
+	int orsp = F.rsp;
 	
 	core_prims(prim, xt + 1);
 	
-	while (orsp < rsp) {
-		xt = code[ip++];
-		prim = code[xt];
+	while (orsp < F.rsp) {
+		xt = F.code[F.ip++];
+		prim = F.code[xt];
 		core_prims(prim, xt + 1);
 	}
 }
@@ -610,42 +531,42 @@ static void create(const char *name, int flags, int prim)
 {
 	int name_size = strlen(name) + 1;
 	
-	check(dictp >= DICT_SIZE - 1,
+	check(F.dictp >= DICT_SIZE - 1,
 		"dictionary overflow while creating %s", name);
-	check(namesp + name_size >= NAMES_SIZE,
+	check(F.namesp + name_size >= NAMES_SIZE,
 		"name area overflow while creating %s", name);
-	dict[dictp].link = code[current];
-	code[current] = dictp;
-	dict[dictp].flags = flags;
-	dict[dictp].xt = cp;
+	F.dict[F.dictp].link = F.code[F.current];
+	F.code[F.current] = F.dictp;
+	F.dict[F.dictp].flags = flags;
+	F.dict[F.dictp].xt = F.cp;
 	compile(prim);
-	dict[dictp].name = namesp;
-	strcpy(&names[namesp], name);
-	namesp += name_size;
-	dictp++;
+	F.dict[F.dictp].name = F.namesp;
+	strcpy(&F.names[F.namesp], name);
+	F.namesp += name_size;
+	F.dictp++;
 }
 
 
 static int getword(char sep)
 {
-	char *wordp = word;
+	char *wordp = F.word;
 	
 	while (SOURCELEFT && ISSEP(sep, CURCHAR))
-		intp++;
+		F.intp++;
 	
 	if (!SOURCELEFT)
 		return 0;
 	
 	while (SOURCELEFT && !ISSEP(sep, CURCHAR)) {
-		if (wordp < word + WORD_MAX - 1)
+		if (wordp < F.word + WORD_MAX - 1)
 			*wordp++ = CURCHAR;
-		intp++;
+		F.intp++;
 	}
 	
 	*wordp = '\0';
 	
 	if (SOURCELEFT)
-		intp++;
+		F.intp++;
 	
 	return 1;
 }
@@ -653,7 +574,7 @@ static int getword(char sep)
 
 static int parse(char sep, int *pstart, int *plength)
 {
-	int start = intp, length = 0;
+	int start = F.intp, length = 0;
 	int escape = 0;
 	
 	if (!SOURCELEFT)
@@ -661,17 +582,17 @@ static int parse(char sep, int *pstart, int *plength)
 	
 	while (SOURCELEFT) {
 		if (CURCHAR == '\\') {
-			intp++, length++;
+			F.intp++, length++;
 			escape = !escape;
 		} else if (ISSEP(sep, CURCHAR)) {
 			if (escape) {
-				intp++, length++;
+				F.intp++, length++;
 				escape = 0;
 			} else {
 				break;
 			}
 		} else {
-			intp++, length++;
+			F.intp++, length++;
 			escape = 0;
 		}
 	}
@@ -679,7 +600,7 @@ static int parse(char sep, int *pstart, int *plength)
 	if (!SOURCELEFT)
 		return 0;
 	
-	intp++;
+	F.intp++;
 		
 	if (pstart)
 		*pstart = start;
@@ -693,25 +614,25 @@ static int parse(char sep, int *pstart, int *plength)
 static word_t *find(const char *word)
 {
 	int p;		// dict address of next word to check
-	int voc = context;	// pfa of vocabulary
+	int voc = F.context;	// pfa of vocabulary
 	
 	do {
-		for (p = code[voc]; p; p = dict[p].link)
-			if (!ISSET(dict[p].flags, SMUDGED) && strcasecmp(&names[dict[p].name], word) == 0)
-				return &dict[p];
-		voc = code[voc + 1];
+		for (p = F.code[voc]; p; p = F.dict[p].link)
+			if (!ISSET(F.dict[p].flags, SMUDGED) && strcasecmp(&F.names[F.dict[p].name], word) == 0)
+				return &F.dict[p];
+		voc = F.code[voc + 1];
 	} while (voc);
 	
 	/* Uncomment to enable CURRENT-vocabulary search
-	if (context == current)
+	if (F.context == F.current)
 		return NULL;
 	
-	voc = current;
+	voc = F.current;
 	do {
-		for (p = code[voc]; p; p = dict[p].link)
-			if (!ISSET(dict[p].flags, SMUDGED) && strcasecmp(&names[dict[p].name], word) == 0)
-				return &dict[p];
-		voc = code[voc + 1];
+		for (p = F.code[voc]; p; p = F.dict[p].link)
+			if (!ISSET(F.dict[p].flags, SMUDGED) && strcasecmp(&F.names[F.dict[p].name], word) == 0)
+				return &F.dict[p];
+		voc = F.code[voc + 1];
 	} while (voc);
 	//*/
 	
@@ -723,13 +644,13 @@ static int toliteral(int *n)
 {
 	int ret, read;
 	
-	if (sscanf(word, "%d%n", &ret, &read) == 1 && read == strlen(word)) {
+	if (sscanf(F.word, "%d%n", &ret, &read) == 1 && read == strlen(F.word)) {
 		if (n)
 			*n = ret;
 		return 1;
 	}
 	
-	if (sscanf(word, "0%*[Xx]%x%n", &ret, &read) == 1 && read == strlen(word)) {
+	if (sscanf(F.word, "0%*[Xx]%x%n", &ret, &read) == 1 && read == strlen(F.word)) {
 		if (n)
 			*n = ret;
 		return 1;
@@ -747,23 +668,23 @@ static void do_interpret(void)
 	while (SOURCELEFT) {
 		if (!getword(' '))
 			break;
-		w = find(word);
+		w = find(F.word);
 		if (w) {
-			if (state == 0 || ISSET(w->flags, IMMEDIATE))
+			if (F.state == 0 || ISSET(w->flags, IMMEDIATE))
 				execute(w->xt);
 			else
 				compile(w->xt);
-		} else {
-			if (toliteral(&n)) {
-				if (state) {
-					compile(lit_xt);
-					compile(n);
-				} else {
-					push(n);
-				}
+		} else if (F.app_notfound && F.app_notfound(F.word)) {
+			// app_notfound() has already done the job
+		} else if (toliteral(&n)) {
+			if (F.state) {
+				compile(F.lit_xt);
+				compile(n);
 			} else {
-				error("%s ?", word);
+				push(n);
 			}
+		} else {
+			error("%s ?", F.word);
 		}
 	}
 }
@@ -780,21 +701,21 @@ static void saveprogram(const char *fname, int entry)
 	
 	check(fwrite(sig, 1, 4, f) < 4, "save error: %s", strerror(errno));
 	check(fwrite(&entry, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&cp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(code, sizeof(int), cp, f) < cp, "save error: %s", strerror(errno));
-	check(fwrite(&dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(data, 1, dp, f) < dp, "save error: %s", strerror(errno));
+	check(fwrite(&F.cp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.code, sizeof(int), F.cp, f) < F.cp, "save error: %s", strerror(errno));
+	check(fwrite(&F.dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.data, 1, F.dp, f) < F.dp, "save error: %s", strerror(errno));
 	
-	check(fwrite(&lit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&exit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&branch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&qbranch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&dodo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&doqdo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&doloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&doaddloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&codecomma_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&store_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.lit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.exit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.branch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.qbranch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.dodo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.doqdo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.doloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.codecomma_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.store_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	
 	fclose(f);
 }
@@ -803,20 +724,20 @@ static void saveprogram(const char *fname, int entry)
 
 static void markfwd(enum cftype type)
 {
-	cfpush(type, cp);
+	cfpush(type, F.cp);
 	compile(0);
 }
 
 
 static void resolvefwd(enum cftype required)
 {
-	code[cfpop(required)] = cp;
+	F.code[cfpop(required)] = F.cp;
 }
 
 
 static void markback(enum cftype type)
 {
-	cfpush(type, cp);
+	cfpush(type, F.cp);
 }
 
 
@@ -831,216 +752,226 @@ static void core_prims(int prim, int pfa)
 	switch (prim) {
 		// control flow
 		case LIT:
-			push(code[ip++]);
+			push(F.code[F.ip++]);
 			break;
 		case ENTER:
 			rpush();
-			running = pfa - 1;
-			ip = pfa;
+			F.running = pfa - 1;
+			F.ip = pfa;
 			break;
 		case EXIT:
-			while (lsp > 0 && lstack[lsp - 1].xt == running)
+			while (F.lsp > 0 && F.lstack[F.lsp - 1].xt == F.running)
 				lpop();
 			rpop();
 			break;
 		case BRANCH:
-			ip = code[ip];
+			F.ip = F.code[F.ip];
 			break;
 		case QBRANCH:
 			if (pop())
-				ip++;
+				F.ip++;
 			else
-				ip = code[ip];
+				F.ip = F.code[F.ip];
 			break;
 		case DODO: {
-			int index = pop(), limit = pop(), leave = code[ip++];
+			int index = pop(), limit = pop(), leave = F.code[F.ip++];
 			lpush(index, limit, leave);
-			} break;
+			break;
+		}
 		case DOQDO: {
-			int index = pop(), limit = pop(), leave = code[ip++];
+			int index = pop(), limit = pop(), leave = F.code[F.ip++];
 			if (index != limit)
 				lpush(index, limit, leave);
 			else
-				ip = leave;
-			} break;
+				F.ip = leave;
+			break;
+		}
 		case DOLOOP:
-			check(lsp <= 0, "usage of LOOP outside any loop");
-			if (++lstack[lsp - 1].index == lstack[lsp - 1].limit) {
-				ip++;
+			check(F.lsp <= 0, "usage of LOOP outside any loop");
+			if (++F.lstack[F.lsp - 1].index == F.lstack[F.lsp - 1].limit) {
+				F.ip++;
 				lpop();
 			} else {
-				ip = code[ip];
-			} break;
+				F.ip = F.code[F.ip];
+			}
+			break;
 		case DOADDLOOP: {
 			int step = pop(), index, limit;
-			check(lsp <= 0, "usage of +LOOP outside any loop");
-			index = lstack[lsp - 1].index;
-			limit = lstack[lsp - 1].limit;
+			check(F.lsp <= 0, "usage of +LOOP outside any loop");
+			index = F.lstack[F.lsp - 1].index;
+			limit = F.lstack[F.lsp - 1].limit;
 			if ((index < limit) == (index + step < limit)) {
-				lstack[lsp - 1].index += step;
-				ip = code[ip];
+				F.lstack[F.lsp - 1].index += step;
+				F.ip = F.code[F.ip];
 			} else {
-				ip++;
+				F.ip++;
 				lpop();
 			}
-			} break;
+			break;
+		}
 		case DO:
-			compile(dodo_xt);
+			compile(F.dodo_xt);
 			markfwd(CFDO);
 			markback(CFLOOP);
 			break;
 		case QDO:
-			compile(doqdo_xt);
+			compile(F.doqdo_xt);
 			markfwd(CFDO);
 			markback(CFLOOP);
 			break;
 		case LOOP:
-			compile(doloop_xt);
+			compile(F.doloop_xt);
 			resolveback(CFLOOP);
 			resolvefwd(CFDO);
 			break;
 		case ADDLOOP:
-			compile(doaddloop_xt);
+			compile(F.doaddloop_xt);
 			resolveback(CFLOOP);
 			resolvefwd(CFDO);
 			break;
 		case IF:
-			compile(qbranch_xt);
+			compile(F.qbranch_xt);
 			markfwd(CFIF);
 			break;
 		case ELSE: {
 			int ifbranch;
 			check(cfpeek() != CFIF, "unbalanced control structure");
 			ifbranch = cfpop(CFIF);
-			compile(branch_xt);
+			compile(F.branch_xt);
 			markfwd(CFELSE);
 			cfpush(CFIF, ifbranch);
 			resolvefwd(CFIF);
-			} break;
+			break;
+		}
 		case THEN: {
 			enum cftype type = cfpeek();
 			check(type != CFIF && type != CFELSE, "unbalanced control structure");
 			resolvefwd(type);
-			} break;
+			break;
+		}
 		case BEGIN:
 			markback(CFBEGIN);
 			break;
 		case UNTIL:
-			compile(qbranch_xt);
+			compile(F.qbranch_xt);
 			resolveback(CFBEGIN);
 			break;
 		case AGAIN:
-			compile(branch_xt);
+			compile(F.branch_xt);
 			resolveback(CFBEGIN);
 			break;
 		case WHILE: {
 			int beginbranch = cfpop(CFBEGIN);
-			compile(qbranch_xt);
+			compile(F.qbranch_xt);
 			markfwd(CFWHILE);
 			cfpush(CFBEGIN, beginbranch);
-			} break;
+			break;
+		}
 		case REPEAT:
-			compile(branch_xt);
+			compile(F.branch_xt);
 			resolveback(CFBEGIN);
 			resolvefwd(CFWHILE);
 			break;
 		case LEAVE:
-			check(lsp <= 0, "attempt to use LEAVE outside any loop");
-			check(lstack[lsp - 1].xt != running, "LEAVE called from nested definition");
-			ip = lstack[lsp - 1].leave;
+			check(F.lsp <= 0, "attempt to use LEAVE outside any loop");
+			check(F.lstack[F.lsp - 1].xt != F.running, "LEAVE called from nested definition");
+			F.ip = F.lstack[F.lsp - 1].leave;
 			lpop();
 			break;
 		case I:
-			check(lsp <= 0, "attempt to use I outside any loop");
-			push(lstack[lsp - 1].index);
+			check(F.lsp <= 0, "attempt to use I outside any loop");
+			push(F.lstack[F.lsp - 1].index);
 			break;
 		case J:
-			check(lsp <= 1, "attempt to use J without outer loop");
-			push(lstack[lsp - 2].index);
+			check(F.lsp <= 1, "attempt to use J without outer loop");
+			push(F.lstack[F.lsp - 2].index);
 			break;
 #ifndef FORTH_ONLY_VM
 		case COLON:
 			check(getword(' ') == 0, "word required for :");
-			create(word, SMUDGED, ENTER);
-			state = FORTH_BOOL(1);
+			create(F.word, SMUDGED, ENTER);
+			F.state = FORTH_BOOL(1);
 			break;
 		case SEMICOLON:
-			check(state == 0, "; is used outside any definition");
-			check(cfsp > 0, "unbalanced control structure");
-			compile(exit_xt);
-			CLR(dict[code[current]].flags, SMUDGED);
-			state = 0;
+			check(F.state == 0, "; is used outside any definition");
+			check(F.cfsp > 0, "unbalanced control structure");
+			compile(F.exit_xt);
+			CLR(F.dict[F.code[F.current]].flags, SMUDGED);
+			F.state = 0;
 			break;
 #endif
 		case EXECUTE: {
 			int xt = pop();
 			checkcode(xt);
 			execute(xt);
-			} break;
+			break;
+		}
 		case DOTRY: {
 			jmp_buf ojmp;
-			int osp = sp, orsp = rsp, olsp = lsp, oip = ip, orunning = running;
+			int osp = F.sp, orsp = F.rsp, olsp = F.lsp, oip = F.ip, orunning = F.running;
 #ifndef FORTH_ONLY_VM
-			const char *osource = source;
-			int ointp = intp, ostate = state;
+			const char *osource = F.source;
+			int ointp = F.intp, ostate = F.state;
 #endif
-			memcpy(ojmp, errjmp, sizeof(jmp_buf));
-			errhandlers++;
-			if (setjmp(errjmp) == 0) {
-				int xt = code[ip++];
+			memcpy(ojmp, F.errjmp, sizeof(jmp_buf));
+			F.errhandlers++;
+			if (setjmp(F.errjmp) == 0) {
+				int xt = F.code[F.ip++];
 				checkcode(xt);
 				execute(xt);
-				memcpy(errjmp, ojmp, sizeof(jmp_buf));
-				errhandlers--;
+				memcpy(F.errjmp, ojmp, sizeof(jmp_buf));
+				F.errhandlers--;
 				push(~0);
 			} else {
-				sp = osp, rsp = orsp, lsp = olsp, ip = oip, running = orunning;
-				if (running)
-					ip++;
+				F.sp = osp, F.rsp = orsp, F.lsp = olsp, F.ip = oip, F.running = orunning;
+				if (F.running)
+					F.ip++;
 #ifndef FORTH_ONLY_VM
-				source = osource;
-				intp = ointp, state = ostate;
+				F.source = osource;
+				F.intp = ointp, F.state = ostate;
 #endif
-				memcpy(errjmp, ojmp, sizeof(jmp_buf));
-				errhandlers--;
+				memcpy(F.errjmp, ojmp, sizeof(jmp_buf));
+				F.errhandlers--;
 				push(0);
 			}
-			} break;
+			break;
+		}
 #ifndef FORTH_ONLY_VM
 		case TRY: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for TRY");
-			w = find(word);
-			check(!w, "%s ?", word);
+			w = find(F.word);
+			check(!w, "%s ?", F.word);
 			
-			if (state) {
-				compile(dotry_xt);
+			if (F.state) {
+				compile(F.dotry_xt);
 				compile(w->xt);
 			} else {
 				jmp_buf ojmp;
-				int osp = sp, orsp = rsp, olsp = lsp, oip = ip, orunning = running;
-				const char *osource = source;
-				int ointp = intp, ostate = state;
-				memcpy(ojmp, errjmp, sizeof(jmp_buf));
-				errhandlers++;
-				if (setjmp(errjmp) == 0) {
+				int osp = F.sp, orsp = F.rsp, olsp = F.lsp, oip = F.ip, orunning = F.running;
+				const char *osource = F.source;
+				int ointp = F.intp, ostate = F.state;
+				memcpy(ojmp, F.errjmp, sizeof(jmp_buf));
+				F.errhandlers++;
+				if (setjmp(F.errjmp) == 0) {
 					checkcode(w->xt);
 					execute(w->xt);
-					memcpy(errjmp, ojmp, sizeof(jmp_buf));
-					errhandlers--;
+					memcpy(F.errjmp, ojmp, sizeof(jmp_buf));
+					F.errhandlers--;
 					push(~0);
 				} else {
-					sp = osp, rsp = orsp, lsp = olsp, ip = oip, running = orunning;
-					if (running)
-						ip++;
-					source = osource;
-					intp = ointp, state = ostate;
-					memcpy(errjmp, ojmp, sizeof(jmp_buf));
-					errhandlers--;
+					F.sp = osp, F.rsp = orsp, F.lsp = olsp, F.ip = oip, F.running = orunning;
+					if (F.running)
+						F.ip++;
+					F.source = osource;
+					F.intp = ointp, F.state = ostate;
+					memcpy(F.errjmp, ojmp, sizeof(jmp_buf));
+					F.errhandlers--;
 					push(0);
 				}
 			}
-			} break;
+			break;
+		}
 #endif
 		case ERROR:
 			fth_error("%s", fth_area(fth_pop(), 1));
@@ -1050,31 +981,37 @@ static void core_prims(int prim, int pfa)
 		case ADD: {
 			int b = pop(), a = pop();
 			push(a + b);
-			} break;
+			break;
+		}
 		case SUB: {
 			int b = pop(), a = pop();
 			push(a - b);
-			} break;
+			break;
+		}
 		case MUL: {
 			int b = pop(), a = pop();
 			push(a * b);
-			} break;
+			break;
+		}
 		case DIV: {
 			int b = pop(), a = pop();
 			check(b == 0, "division by zero");
 			push(a / b);
-			} break;
+			break;
+		}
 		case MOD: {
 			int b = pop(), a = pop();
 			check(b == 0, "division by zero");
 			push(a % b);
-			} break;
+			break;
+		}
 		case DIVMOD: {
 			int b = pop(), a = pop();
 			check(b == 0, "division by zero");
 			push(a % b);
 			push(a / b);
-			} break;
+			break;
+		}
 		case NEGATE:
 			push(-pop());
 			break;
@@ -1099,27 +1036,32 @@ static void core_prims(int prim, int pfa)
 		case MIN: {
 			int b = pop(), a = pop();
 			push(a < b ? a : b);
-			} break;
+			break;
+		}
 		case MAX: {
 			int b = pop(), a = pop();
 			push(a > b ? a : b);
-			} break;
+			break;
+		}
 		case ABS: {
 			int a = pop();
 			push(a < 0 ? -a : a);
-			} break;
+			break;
+		}
 		
 		// stack
 		case SWAP: {
 			int b = pop(), a = pop();
 			push(b);
 			push(a);
-			} break;
+			break;
+		}
 		case DUP: {
 			int a = pop();
 			push(a);
 			push(a);
-			} break;
+			break;
+		}
 		case DROP:
 			(void)pop();
 			break;
@@ -1128,37 +1070,43 @@ static void core_prims(int prim, int pfa)
 			push(b);
 			push(c);
 			push(a);
-			} break;
+			break;
+		}
 		case MROT: {
 			int c = pop(), b = pop(), a = pop();
 			push(c);
 			push(a);
 			push(b);
-			} break;
+			break;
+		}
 		case TUCK: {
 			int b = pop(), a = pop();
 			push(b);
 			push(a);
 			push(b);
-			} break;
+			break;
+		}
 		case OVER: {
 			int b = pop(), a = pop();
 			push(a);
 			push(b);
 			push(a);
-			} break;
+			break;
+		}
 		case NIP: {
 			int b = pop();
 			(void)pop();
 			push(b);
-			} break;
+			break;
+		}
 		case DDUP: {
 			int b = pop(), a = pop();
 			push(a);
 			push(b);
 			push(a);
 			push(b);
-			} break;
+			break;
+		}
 		case DDROP:
 			(void)pop();
 			(void)pop();
@@ -1168,17 +1116,20 @@ static void core_prims(int prim, int pfa)
 			if (a)
 				push(a);
 			push(a);
-			} break;
+			break;
+		}
 		
 		// logic
 		case AND: {
 			int b = pop(), a = pop();
 			push(a & b);
-			} break;
+			break;
+		}
 		case OR: {
 			int b = pop(), a = pop();
 			push(a | b);
-			} break;
+			break;
+		}
 		case NOT:
 			push(~pop());
 			break;
@@ -1189,27 +1140,33 @@ static void core_prims(int prim, int pfa)
 		case LESS: {
 			int b = pop(), a = pop();
 			push(FORTH_BOOL(a < b));
-			} break;
+			break;
+		}
 		case LESSEQUAL: {
 			int b = pop(), a = pop();
 			push(FORTH_BOOL(a <= b));
-			} break;
+			break;
+		}
 		case GREATER: {
 			int b = pop(), a = pop();
 			push(FORTH_BOOL(a > b));
-			} break;
+			break;
+		}
 		case GREATEREQUAL: {
 			int b = pop(), a = pop();
 			push(FORTH_BOOL(a >= b));
-			} break;
+			break;
+		}
 		case EQUAL: {
 			int b = pop(), a = pop();
 			push(FORTH_BOOL(a == b));
-			} break;
+			break;
+		}
 		case NOTEQUAL: {
 			int b = pop(), a = pop();
 			push(FORTH_BOOL(a != b));
-			} break;
+			break;
+		}
 		case ZEROLESS:
 			push(FORTH_BOOL(pop() < 0));
 			break;
@@ -1231,38 +1188,40 @@ static void core_prims(int prim, int pfa)
 		case WITHIN: {
 			int b = pop(), a = pop(), x = pop();
 			push(FORTH_BOOL(a <= x && x < b));
-			} break;
+			break;
+		}
 		case BETWEEN: {
 			int b = pop(), a = pop(), x = pop();
 			push(FORTH_BOOL(a <= x && x <= b));
-			} break;
+			break;
+		}
 		
 		// data
 		case DOCONSTANT:
-			push(code[pfa]);
+			push(F.code[pfa]);
 			break;
 		case DOVARIABLE:
-			push(code[pfa]);		// is variable a constant !?!!
+			push(F.code[pfa]);		// is variable a constant !?!!
 			break;
 #ifndef FORTH_ONLY_VM
 		case CONSTANT:
 			check(getword(' ') == 0, "word required for CONSTANT");
-			create(word, 0, DOCONSTANT);
+			create(F.word, 0, DOCONSTANT);
 			compile(pop());
 			break;
 		case VARIABLE:
 			check(getword(' ') == 0, "word required for VARIABLE");
-			create(word, 0, DOVARIABLE);
-			compile(dp);
+			create(F.word, 0, DOVARIABLE);
+			compile(F.dp);
 			compile(0);			// xt of DOES>-part
 			dcompile(0);
 			break;
 #endif
 		case DODOES:
-			push(code[pfa]);
+			push(F.code[pfa]);
 			rpush();
-			running = pfa - 1;
-			ip = code[pfa + 1];
+			F.running = pfa - 1;
+			F.ip = F.code[pfa + 1];
 			break;
 		case FETCH:
 			push(fetch(pop()));
@@ -1270,14 +1229,16 @@ static void core_prims(int prim, int pfa)
 		case STORE: {
 			int a = pop(), x = pop();
 			store(a, x);
-			} break;
+			break;
+		}
 		case CFETCH:
 			push(cfetch(pop()) & 0xFF);
 			break;
 		case CSTORE: {
 			int a = pop(), x = pop();
 			cstore(a, x);
-			} break;
+			break;
+		}
 		case COMMA:
 			dcompile(pop());
 			break;
@@ -1287,82 +1248,89 @@ static void core_prims(int prim, int pfa)
 #ifndef FORTH_ONLY_VM
 		case CREATE:
 			check(getword(' ') == 0, "word required for CREATE");
-			create(word, 0, DOVARIABLE);
-			compile(dp);
+			create(F.word, 0, DOVARIABLE);
+			compile(F.dp);
 			compile(0);			// xt of DOES>-part
 			break;
 		case DOES:
-			check(code[dict[code[current]].xt] != DOVARIABLE, "%s is not CREATEd", &names[dict[code[current]].name]);
-			code[dict[code[current]].xt] = DODOES;
-			if (running) {
-				code[dict[code[current]].xt + 2] = ip;
+			check(F.code[F.dict[F.code[F.current]].xt] != DOVARIABLE, "%s is not CREATEd", &F.names[F.dict[F.code[F.current]].name]);
+			F.code[F.dict[F.code[F.current]].xt] = DODOES;
+			if (F.running) {
+				F.code[F.dict[F.code[F.current]].xt + 2] = F.ip;
 				rpop();
 			} else {
-				code[dict[code[current]].xt + 2] = cp;
-				state = FORTH_BOOL(1);
+				F.code[F.dict[F.code[F.current]].xt + 2] = F.cp;
+				F.state = FORTH_BOOL(1);
 			}
 			break;
 #endif
 		case ADDSTORE: {
 			int a = pop(), x = pop();
 			checkdata(a, sizeof(int));
-			*(int *)&data[a] += x;
-			} break;
+			*(int *)&F.data[a] += x;
+			break;
+		}
 		case DOVALUE:
-			push(fetch(code[pfa]));
+			push(fetch(F.code[pfa]));
 			break;
 #ifndef FORTH_ONLY_VM
 		case VALUE:
 			check(getword(' ') == 0, "word required for VALUE");
-			create(word, 0, DOVALUE);
-			compile(dp);
+			create(F.word, 0, DOVALUE);
+			compile(F.dp);
 			dcompile(0);
 			break;
 		case TO: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for TO");
-			w = find(word);
-			check(w == NULL, "%s ?", word);
-			check(code[w->xt] != DOVALUE, "%s is not a VALUE", word);
-			if (state) {
-				compile(lit_xt);
-				compile(code[w->xt + 1]);
-				compile(store_xt);
+			w = find(F.word);
+			check(w == NULL, "%s ?", F.word);
+			check(F.code[w->xt] != DOVALUE, "%s is not a VALUE", F.word);
+			if (F.state) {
+				compile(F.lit_xt);
+				compile(F.code[w->xt + 1]);
+				compile(F.store_xt);
 			} else {
-				store(code[w->xt + 1], pop());
+				store(F.code[w->xt + 1], pop());
 			}
-			} break;
+			break;
+		}
 #endif
 		case HERE:
-			push(dp);
+			push(F.dp);
 			break;
 		case ALLOT: {
 			int size = pop();
-			checkdata(dp, size);
-			dp += size;
-			} break;
+			checkdata(F.dp, size);
+			F.dp += size;
+			break;
+		}
 		case TODATA: {
 			int xt = pop();
 			checkcode(xt);
-			check(code[xt] != DOVARIABLE && code[xt] != DODOES, "attempt to get data address of something, that is not CREATEd");
-			push(code[xt + 1]);
-			} break;
+			check(F.code[xt] != DOVARIABLE && F.code[xt] != DODOES, "attempt to get data address of something, that is not CREATEd");
+			push(F.code[xt + 1]);
+			break;
+		}
 		case MOVE: {
 			int size = pop(), b = pop(), a = pop();
 			checkdata(a, size);
 			checkdata(b, size);
-			memmove(&data[b], &data[a], size);
-			} break;
+			memmove(&F.data[b], &F.data[a], size);
+			break;
+		}
 		case FILL: {
 			int c = pop(), size = pop(), a = pop();
 			checkdata(a, size);
-			memset(&data[a], c, size);
-			} break;
+			memset(&F.data[a], c, size);
+			break;
+		}
 		case ERASE: {
 			int size = pop(), a = pop();
 			checkdata(a, size);
-			memset(&data[a], 0, size);
-			} break;
+			memset(&F.data[a], 0, size);
+			break;
+		}
 		
 		// compilation
 		case CODECOMMA:
@@ -1372,68 +1340,72 @@ static void core_prims(int prim, int pfa)
 		case COMPILE: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for COMPILE");
-			w = find(word);
-			check(w == NULL, "%s ?", word);
-			compile(lit_xt);
+			w = find(F.word);
+			check(w == NULL, "%s ?", F.word);
+			compile(F.lit_xt);
 			compile(w->xt);
-			compile(codecomma_xt);
-			} break;
+			compile(F.codecomma_xt);
+			break;
+		}
 		case COMPILENOW: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for [COMPILE]");
-			w = find(word);
-			check(w == NULL, "%s ?", word);
+			w = find(F.word);
+			check(w == NULL, "%s ?", F.word);
 			compile(w->xt);
-			} break;
+			break;
+		}
 		case TICK: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for '");
-			w = find(word);
-			check(w == NULL, "%s ?", word);
+			w = find(F.word);
+			check(w == NULL, "%s ?", F.word);
 			push(w->xt);
-			} break;
+			break;
+		}
 		case TICKNOW: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for [']");
-			w = find(word);
-			check(w == NULL, "%s ?", word);
-			compile(lit_xt);
+			w = find(F.word);
+			check(w == NULL, "%s ?", F.word);
+			compile(F.lit_xt);
 			compile(w->xt);
-			} break;
+			break;
+		}
 		case MAKEIMMEDIATE:
-			SET(dict[code[current]].flags, IMMEDIATE);
+			SET(F.dict[F.code[F.current]].flags, IMMEDIATE);
 			break;
 		case STATE:
-			push(FORTH_BOOL(state));
+			push(FORTH_BOOL(F.state));
 			break;
 		case COMPON:
-			state = ~0;
+			F.state = ~0;
 			break;
 		case COMPOFF:
-			state = 0;
+			F.state = 0;
 			break;
 		case BLOCKSTART:
-			state = ~0;
-			push(cp);
+			F.state = ~0;
+			push(F.cp);
 			compile(ENTER);
 			break;
 		case BLOCKEND:
-			check(state == 0, "attempt to use } outside any definition");
-			check(cfsp > 0, "unbalanced control structure");
-			state = 0;
-			compile(exit_xt);
+			check(F.state == 0, "attempt to use } outside any definition");
+			check(F.cfsp > 0, "unbalanced control structure");
+			F.state = 0;
+			compile(F.exit_xt);
 			execute(pop());
 			break;
 #endif
 		case LENCODE:
-			push(cp);
+			push(F.cp);
 			break;
 #ifndef FORTH_ONLY_VM
 		case LENDICT:
-			push(dictp);
+			push(F.dictp);
 			break;
 		case LENNAMES:
-			push(namesp);
+			push(F.namesp);
 			break;
 #endif
 		
@@ -1447,39 +1419,42 @@ static void core_prims(int prim, int pfa)
 			break;
 		case CHAR:
 			check(getword(' ') == 0, "word required for CHAR");
-			if (state) {
-				compile(lit_xt);
-				compile(word[0]);
+			if (F.state) {
+				compile(F.lit_xt);
+				compile(F.word[0]);
 			} else {
-				push(word[0]);
+				push(F.word[0]);
 			}
 			break;
 		case QUOTE: {
 			int start, length;
 			check(parse('"', &start, &length) == 0, "unmatched \"");
-			if (state) {
-				compile(lit_xt);
-				compile(dp);
+			if (F.state) {
+				compile(F.lit_xt);
+				compile(F.dp);
 			} else {
-				push(dp);
+				push(F.dp);
 			}
-			scompile(&source[start], length);
-			} break;
+			scompile(&F.source[start], length);
+			break;
+		}
 #endif
 		case DEPTH:
-			push(sp);
+			push(F.sp);
 			break;
 		case LENGTH: {
 			int a = pop();
 			checkdata(a, 1);
-			push(strlen(&data[a]));
-			} break;
+			push(strlen(&F.data[a]));
+			break;
+		}
 		case COUNT: {
 			int a = pop();
 			checkdata(a, 1);
 			push(a);
-			push(strlen(&data[a]));
-			} break;
+			push(strlen(&F.data[a]));
+			break;
+		}
 		case BL:
 			push(' ');
 			break;
@@ -1487,38 +1462,41 @@ static void core_prims(int prim, int pfa)
 		case STRING: {
 			int sep = pop(), start, length;
 			check(!parse(sep, &start, &length), "string separated by `%c' required for STRING", sep);
-			push(dp);
-			scompile(&source[start], length);
-			} break;
+			push(F.dp);
+			scompile(&F.source[start], length);
+			break;
+		}
 		case WORD:
 			check(getword(pop()) == 0, "word required for WORD");
-			checkdata(dp, strlen(word) + 1);
-			strcpy(&data[dp], word);
-			push(dp);
+			checkdata(F.dp, strlen(F.word) + 1);
+			strcpy(&F.data[F.dp], F.word);
+			push(F.dp);
 			break;
 		case VOCABULARY:
 			check(getword(' ') == 0, "word required for VOCABULARY");
-			create(word, 0, DOVOCABULARY);
+			create(F.word, 0, DOVOCABULARY);
 			compile(0);			// dict address of latest definition in this voc
-			compile(current);		// link to parent voc
+			compile(F.current);		// link to parent voc
 			break;
 		case DOVOCABULARY:
-			context = pfa;
+			F.context = pfa;
 			break;
 		case DEFINITIONS:
-			current = context;
+			F.current = F.context;
 			break;
 #  ifndef FORTH_NO_SAVES
 		case SAVE: {
 			int a = pop();
 			checkdata(a, 1);
-			fth_savesystem(&data[a]);
-			} break;
+			fth_savesystem(&F.data[a]);
+			break;
+		}
 		case LOAD: {
 			int a = pop();
 			checkdata(a, 1);
-			fth_loadsystem(&data[a]);
-			} break;
+			fth_loadsystem(&F.data[a]);
+			break;
+		}
 #  endif	/* FORTH_NO_SAVES */
 #endif		/* FORTH_ONLY_VM */
 #ifndef FORTH_NO_SAVES
@@ -1527,22 +1505,25 @@ static void core_prims(int prim, int pfa)
 			int a = pop();
 			checkcode(entry);
 			checkdata(a, 1);
-			saveprogram(&data[a], entry);
-			} break;
+			saveprogram(&F.data[a], entry);
+			break;
+		}
 		case SAVEDATA: {
 			int a = pop();
 			checkdata(a, 1);
-			fth_savedata(&data[a]);
-			} break;
+			fth_savedata(&F.data[a]);
+			break;
+		}
 		case LOADDATA: {
 			int a = pop();
 			checkdata(a, 1);
-			fth_loaddata(&data[a]);
-			} break;
+			fth_loaddata(&F.data[a]);
+			break;
+		}
 #endif
 		
 		default:
-			app_prims(prim);
+			F.app_prims(prim);
 			break;
 	}
 }
@@ -1555,14 +1536,14 @@ void fth_error(const char *fmt, ...)
 {
 	va_list args;
 	
-	if (fmt != errormsg) {		// for re-throwing error messages
+	if (fmt != F.errormsg) {		// for re-throwing error messages
 		va_start(args, fmt);
-		vsnprintf(errormsg, ERROR_MAX, fmt, args);
+		vsnprintf(F.errormsg, ERROR_MAX, fmt, args);
 		va_end(args);
 	}
 	
-	if (errhandlers)
-		longjmp(errjmp, 1);
+	if (F.errhandlers)
+		longjmp(F.errjmp, 1);
 	else
 		abort();
 }
@@ -1570,87 +1551,88 @@ void fth_error(const char *fmt, ...)
 
 void fth_push(int x)
 {
-	check(sp >= STACK_SIZE, "stack overflow");
-	stack[sp++] = x;
+	check(F.sp >= STACK_SIZE, "stack overflow");
+	F.stack[F.sp++] = x;
 }
 
 
 int fth_pop(void)
 {
-	check(sp <= 0, "stack underflow");
-	return stack[--sp];
+	check(F.sp <= 0, "stack underflow");
+	return F.stack[--F.sp];
 }
 
 
 int fth_fetch(int a)
 {
 	checkdata(a, sizeof(int));
-	return *(int *)&data[a];
+	return *(int *)&F.data[a];
 }
 
 
 void fth_store(int a, int x)
 {
 	checkdata(a, sizeof(int));
-	*(int *)&data[a] = x;
+	*(int *)&F.data[a] = x;
 }
 
 
 char fth_cfetch(int a)
 {
 	checkdata(a, 1);
-	return data[a];
+	return F.data[a];
 }
 
 
 void fth_cstore(int a, char x)
 {
 	checkdata(a, 1);
-	data[a] = x;
+	F.data[a] = x;
 }
 
 
 char *fth_area(int a, int size)
 {
 	checkdata(a, size);
-	return &data[a];
+	return &F.data[a];
 }
 
 
-void fth_init(primitives_f app_primitives)
+void fth_init(primitives_f app_primitives, notfound_f app_notfnd)
 {
-	app_prims = app_primitives;
-	data[DATA_SIZE] = '\0';
+	F.app_prims = app_primitives;
+	F.app_notfound = app_notfnd;
+	F.data[DATA_SIZE] = '\0';
 	reset();
-	cp = dp = 1;		// 0 is an "invalid" address
-	errhandlers = 0;
+	F.cp = F.dp = 1;		// 0 is an "invalid" address
+	F.errhandlers = 0;
 	
 	// initial vocabulary
 #ifndef FORTH_ONLY_VM
-	namesp = 0;
-	dictp = 1;
-	context = current = 0;
-	code[0] = 0;
+	F.namesp = 0;
+	F.dictp = 1;
+	F.context = F.current = 0;
+	F.code[0] = 0;
 	create("FORTH", 0, DOVOCABULARY);
-	context = current = forth_voc = cp;
+	F.context = F.current = F.forth_voc = F.cp;
 	compile(1);
 	compile(0);
 	
 	// core xt-s
-	lit_xt = cp;		compile(LIT);
-	branch_xt = cp;		compile(BRANCH);
-	qbranch_xt = cp;	compile(QBRANCH);
-	dodo_xt = cp;		compile(DODO);
-	doqdo_xt = cp;		compile(DOQDO);
-	doloop_xt = cp;		compile(DOLOOP);
-	doaddloop_xt = cp;	compile(DOADDLOOP);
-	dotry_xt = cp;		compile(DOTRY);
+	F.lit_xt = F.cp;		compile(LIT);
+	F.branch_xt = F.cp;		compile(BRANCH);
+	F.qbranch_xt = F.cp;		compile(QBRANCH);
+	F.dodo_xt = F.cp;		compile(DODO);
+	F.doqdo_xt = F.cp;		compile(DOQDO);
+	F.doloop_xt = F.cp;		compile(DOLOOP);
+	F.doaddloop_xt = F.cp;		compile(DOADDLOOP);
+	F.dotry_xt = F.cp;		compile(DOTRY);
 	
 	fth_library(core_words);
 	
-	exit_xt = find("EXIT")->xt;
-	codecomma_xt = find("CODE,")->xt;
-	store_xt = find("!")->xt;
+	F.exit_xt = find("EXIT")->xt;
+	F.codecomma_xt = find("CODE,")->xt;
+	F.store_xt = find("!")->xt;
 #endif
 }
 
@@ -1664,25 +1646,25 @@ void fth_primitive(const char *name, int code, int immediate)
 
 int fth_interpret(const char *s)
 {
-	const char *osource = source;
-	int ointp = intp;
+	const char *osource = F.source;
+	int ointp = F.intp;
 	jmp_buf oerr;
 	int ret;
 	
-	memcpy(oerr, errjmp, sizeof(jmp_buf));
-	errhandlers++;
-	if (setjmp(errjmp) == 0) {
-		source = s;
-		intp = 0;
+	memcpy(oerr, F.errjmp, sizeof(jmp_buf));
+	F.errhandlers++;
+	if (setjmp(F.errjmp) == 0) {
+		F.source = s;
+		F.intp = 0;
 		do_interpret();
 		ret = 1;
-		intp = ointp;
-		source = osource;
+		F.intp = ointp;
+		F.source = osource;
 	} else {
 		ret = 0;
 	}
-	memcpy(errjmp, oerr, sizeof(jmp_buf));
-	errhandlers--;
+	memcpy(F.errjmp, oerr, sizeof(jmp_buf));
+	F.errhandlers--;
 	return ret;
 }
 
@@ -1693,9 +1675,9 @@ int fth_execute(const char *w)
 	jmp_buf oerr;
 	int ret;
 	
-	memcpy(oerr, errjmp, sizeof(jmp_buf));
-	errhandlers++;
-	if (setjmp(errjmp) == 0) {
+	memcpy(oerr, F.errjmp, sizeof(jmp_buf));
+	F.errhandlers++;
+	if (setjmp(F.errjmp) == 0) {
 		pw = find(w);
 		check(pw == NULL, "%s ?", w);
 		execute(pw->xt);
@@ -1704,8 +1686,8 @@ int fth_execute(const char *w)
 		ret = 0;
 	}
 	
-	memcpy(errjmp, oerr, sizeof(jmp_buf));
-	errhandlers--;
+	memcpy(F.errjmp, oerr, sizeof(jmp_buf));
+	F.errhandlers--;
 	return ret;
 }
 
@@ -1721,40 +1703,40 @@ void fth_library(primitive_word_t *lib)
 
 int fth_getstate(void)
 {
-	return state;
+	return F.state;
 }
 #endif
 
 
 void fth_reset(void)
 {
-	sp = rsp = lsp = cfsp = 0;
-	running = 0;
-	errormsg[0] = 0;
-	errhandlers = 0;
+	F.sp = F.rsp = F.lsp = F.cfsp = 0;
+	F.running = 0;
+	F.errormsg[0] = 0;
+	F.errhandlers = 0;
 #ifndef FORTH_ONLY_VM
-	state = 0;
-	context = current = forth_voc;
+	F.state = 0;
+	F.context = F.current = F.forth_voc;
 #endif
 }
 
 
 const char *fth_geterror(void)
 {
-	return errormsg;
+	return F.errormsg;
 }
 
 
 int fth_getdepth(void)
 {
-	return sp;
+	return F.sp;
 }
 
 
 int fth_getstack(int idx)
 {
-	if (idx >= 0 && idx < sp)
-		return stack[idx];
+	if (idx >= 0 && idx < F.sp)
+		return F.stack[idx];
 	else
 		return 0;
 }
@@ -1765,39 +1747,39 @@ const char *fth_geterrorline(int *plen, int *pintp, int *plineno)
 {
 	int line = 1, beg = 0, end, i;
 	
-	if (!source)
+	if (!F.source)
 		return NULL;
 	
-	if (intp > 0)
-		intp--;
+	if (F.intp > 0)
+		F.intp--;
 	
-	while (intp > 0 && (intp == strlen(source) || ISSEP(' ', CURCHAR)))
-		intp--;
+	while (F.intp > 0 && (F.intp == strlen(F.source) || ISSEP(' ', CURCHAR)))
+		F.intp--;
 	
-	for (i = 0; i < intp; i++)
-		if (source[i] == '\n') {
+	for (i = 0; i < F.intp; i++)
+		if (F.source[i] == '\n') {
 			line++;
 			beg = i + 1;
 		}
 	
-	for (; i < strlen(source); i++)
-		if (source[i] == '\n')
+	for (; i < strlen(F.source); i++)
+		if (F.source[i] == '\n')
 			break;
 	end = i;
 	
 	if (plen)
 		*plen = end - beg;
 	if (pintp)
-		*pintp = intp - beg;
+		*pintp = F.intp - beg;
 	if (plineno)
 		*plineno = line;
-	return &source[beg];
+	return &F.source[beg];
 }
 
 
 int fth_gettracedepth(void)
 {
-	return rsp;
+	return F.rsp;
 }
 
 
@@ -1805,20 +1787,20 @@ const char *fth_gettrace(int idx)
 {
 	int xt, pw, voc;
 	
-	if (idx < 0 || idx >= rsp)
+	if (idx < 0 || idx >= F.rsp)
 		return "<invalid backtrace index>";
 	
-	if (idx == rsp - 1)
-		xt = running;
+	if (idx == F.rsp - 1)
+		xt = F.running;
 	else
-		xt = rstack[idx + 1].xt;
+		xt = F.rstack[idx + 1].xt;
 	
-	voc = context;
+	voc = F.context;
 	do {
-		for (pw = code[voc]; pw; pw = dict[pw].link)
-			if (dict[pw].xt == xt)
-				return &names[dict[pw].name];
-		voc = code[voc + 1];
+		for (pw = F.code[voc]; pw; pw = F.dict[pw].link)
+			if (F.dict[pw].xt == xt)
+				return &F.names[F.dict[pw].name];
+		voc = F.code[voc + 1];
 	} while (voc);
 	
 	return "<unknown>";
@@ -1834,26 +1816,26 @@ void fth_savesystem(const char *fname)
 	check(!f, "save error: %s", strerror(errno));
 
 	check(fwrite(sig, 1, 4, f) < 4, "save error: %s", strerror(errno));
-	check(fwrite(&cp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(code, sizeof(int), cp, f) < cp, "save error: %s", strerror(errno));
-	check(fwrite(&dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(data, 1, dp, f) < dp, "save error: %s", strerror(errno));
-	check(fwrite(&dictp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(dict, sizeof(word_t), dictp, f) < dictp, "save error: %s", strerror(errno));
-	check(fwrite(&namesp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(names, 1, namesp, f) < namesp, "save error: %s", strerror(errno));
-	check(fwrite(&forth_voc, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.cp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.code, sizeof(int), F.cp, f) < F.cp, "save error: %s", strerror(errno));
+	check(fwrite(&F.dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.data, 1, F.dp, f) < F.dp, "save error: %s", strerror(errno));
+	check(fwrite(&F.dictp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.dict, sizeof(word_t), F.dictp, f) < F.dictp, "save error: %s", strerror(errno));
+	check(fwrite(&F.namesp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.names, 1, F.namesp, f) < F.namesp, "save error: %s", strerror(errno));
+	check(fwrite(&F.forth_voc, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	
-	check(fwrite(&lit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&exit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&branch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&qbranch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&dodo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&doqdo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&doloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&doaddloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&codecomma_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(&store_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.lit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.exit_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.branch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.qbranch_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.dodo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.doqdo_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.doloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.codecomma_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.store_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	
 	fclose(f);
 }
@@ -1872,30 +1854,30 @@ void fth_loadsystem(const char *fname)
 	check(sig[2] != sizeof(int), "system is saved for different cell size: %d (we have %d)", sig[2], sizeof(int));
 	check(sig[3] != 0, "signature reserved byte is non-zero");
 	
-	check(fread(&cp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(cp > CODE_SIZE, "saved code (%d B) is larger than code area (%d B)", cp, CODE_SIZE);
-	check(fread(code, sizeof(int), cp, f) < cp, "load error: %s", strerror(errno));
-	check(fread(&dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", dp, DATA_SIZE);
-	check(fread(data, 1, dp, f) < dp, "load error: %s", strerror(errno));
-	check(fread(&dictp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(dictp > DICT_SIZE, "saved dictionary (%d words) is larger than dictionary area (%d B)", dictp, DICT_SIZE);
-	check(fread(dict, sizeof(word_t), dictp, f) < dictp, "load error: %s", strerror(errno));
-	check(fread(&namesp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(namesp > NAMES_SIZE, "saved word names (%d B) is larger than names area (%d B)", namesp, NAMES_SIZE);
-	check(fread(names, 1, namesp, f) < namesp, "load error: %s", strerror(errno));
-	check(fread(&forth_voc, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.cp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.cp > CODE_SIZE, "saved code (%d B) is larger than code area (%d B)", F.cp, CODE_SIZE);
+	check(fread(F.code, sizeof(int), F.cp, f) < F.cp, "load error: %s", strerror(errno));
+	check(fread(&F.dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", F.dp, DATA_SIZE);
+	check(fread(F.data, 1, F.dp, f) < F.dp, "load error: %s", strerror(errno));
+	check(fread(&F.dictp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.dictp > DICT_SIZE, "saved dictionary (%d words) is larger than dictionary area (%d B)", F.dictp, DICT_SIZE);
+	check(fread(F.dict, sizeof(word_t), F.dictp, f) < F.dictp, "load error: %s", strerror(errno));
+	check(fread(&F.namesp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.namesp > NAMES_SIZE, "saved word names (%d B) is larger than names area (%d B)", F.namesp, NAMES_SIZE);
+	check(fread(F.names, 1, F.namesp, f) < F.namesp, "load error: %s", strerror(errno));
+	check(fread(&F.forth_voc, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
-	check(fread(&lit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&exit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&branch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&qbranch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&dodo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&doqdo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&doloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&doaddloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&codecomma_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&store_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.lit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.exit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.branch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.qbranch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.dodo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.doqdo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.doloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.codecomma_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.store_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
 	fclose(f);
 	fth_reset();
@@ -1931,38 +1913,38 @@ int fth_runprogram(const char *fname)
 	check(sig[3] != 0, "signature reserved byte is non-zero");
 	
 	check(fread(&entry, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&cp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(cp > CODE_SIZE, "saved code (%d B) is larger than code area (%d B)", cp, CODE_SIZE);
-	check(fread(code, sizeof(int), cp, f) < cp, "load error: %s", strerror(errno));
-	check(fread(&dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", dp, DATA_SIZE);
-	check(fread(data, 1, dp, f) < dp, "load error: %s", strerror(errno));
+	check(fread(&F.cp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.cp > CODE_SIZE, "saved code (%d B) is larger than code area (%d B)", F.cp, CODE_SIZE);
+	check(fread(F.code, sizeof(int), F.cp, f) < F.cp, "load error: %s", strerror(errno));
+	check(fread(&F.dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", F.dp, DATA_SIZE);
+	check(fread(F.data, 1, F.dp, f) < F.dp, "load error: %s", strerror(errno));
 	
-	check(fread(&lit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&exit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&branch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&qbranch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&dodo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&doqdo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&doloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&doaddloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&codecomma_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(fread(&store_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.lit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.exit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.branch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.qbranch_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.dodo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.doqdo_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.doloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.codecomma_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.store_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
 	fclose(f);
 	fth_reset();
 	
-	memcpy(oerr, errjmp, sizeof(jmp_buf));
-	errhandlers++;
-	if (setjmp(errjmp) == 0) {
+	memcpy(oerr, F.errjmp, sizeof(jmp_buf));
+	F.errhandlers++;
+	if (setjmp(F.errjmp) == 0) {
 		checkcode(entry);
 		execute(entry);
 		ret = 1;
 	} else {
 		ret = 0;
 	}
-	memcpy(errjmp, oerr, sizeof(jmp_buf));
-	errhandlers--;
+	memcpy(F.errjmp, oerr, sizeof(jmp_buf));
+	F.errhandlers--;
 	return ret;
 }
 
@@ -1976,8 +1958,8 @@ void fth_savedata(const char *fname)
 	check(!f, "save error: %s", strerror(errno));
 	
 	check(fwrite(sig, 1, 4, f) < 4, "save error: %s", strerror(errno));
-	check(fwrite(&dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
-	check(fwrite(data, 1, dp, f) < dp, "save error: %s", strerror(errno));
+	check(fwrite(&F.dp, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(F.data, 1, F.dp, f) < F.dp, "save error: %s", strerror(errno));
 	
 	fclose(f);
 }
@@ -1996,9 +1978,9 @@ void fth_loaddata(const char *fname)
 	check(sig[2] != sizeof(int), "program is saved for different cell size: %d (we have %d)", sig[2], sizeof(int));
 	check(sig[3] != 0, "signature reserved byte is non-zero");
 	
-	check(fread(&dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", dp, DATA_SIZE);
-	check(fread(data, 1, dp, f) < dp, "load error: %s", strerror(errno));
+	check(fread(&F.dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(F.dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", F.dp, DATA_SIZE);
+	check(fread(F.data, 1, F.dp, f) < F.dp, "load error: %s", strerror(errno));
 	
 	fclose(f);
 }

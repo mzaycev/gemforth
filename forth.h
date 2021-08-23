@@ -22,6 +22,10 @@
 #endif
 
 
+// Includes
+#include <setjmp.h>
+
+
 // Macros
 #define CORE_PRIM_MAX	1000
 #define ERROR_MAX	256
@@ -36,9 +40,99 @@ typedef struct primitive_word {
 	int code;
 	int immediate;
 } primitive_word_t;
+
+typedef struct word {
+	int link;
+	int xt;
+	int name;
+	char flags;
+} word_t;
 #endif
 
 typedef void (*primitives_f)(int prim);
+typedef int (*notfound_f)(const char *word);
+
+typedef struct forth {
+	// data stack
+	int stack[STACK_SIZE];
+	int sp;
+
+	// return stack
+	struct {
+		int ip;
+		int xt;
+	} rstack[RSTACK_SIZE];
+	int rsp;
+
+	// loop stack
+	struct {
+		int index, limit;
+		int leave;
+		int xt;
+	} lstack[LSTACK_SIZE];
+	int lsp;
+
+	// control flow stack
+	struct {
+		enum cftype {
+			CFIF,
+			CFELSE,
+			CFTHEN,
+			CFBEGIN,
+			CFWHILE,
+			CFDO,
+			CFLOOP
+		} type;
+		int ref;
+	} cfstack[CFSTACK_SIZE];
+	int cfsp;
+
+	// error handling
+	char errormsg[ERROR_MAX];
+	jmp_buf errjmp;
+	int errhandlers;
+
+	// app-specific primitives handler
+	primitives_f app_prims;
+	// app-specific word parsing
+	notfound_f app_notfound;
+
+	// code area
+	int code[CODE_SIZE];
+	int cp;
+
+	// data area
+	char data[DATA_SIZE + 1];	// with trailing 0
+	int dp;
+
+#ifndef FORTH_ONLY_VM
+	// dictionary area
+	word_t dict[DICT_SIZE];
+	int dictp;
+	int context, current, forth_voc;
+
+	// names area
+	char names[NAMES_SIZE];
+	int namesp;
+#endif
+
+	// state
+	int ip;
+	int running;
+#ifndef FORTH_ONLY_VM
+	int state;
+	const char *source;
+	int intp;
+	char word[WORD_MAX];
+#endif
+
+	// core xt
+	int lit_xt, exit_xt, branch_xt, qbranch_xt, dodo_xt, doqdo_xt, doloop_xt, doaddloop_xt, codecomma_xt, store_xt, dotry_xt;
+} forth_t;
+
+
+// Data
+extern forth_t forth;
 
 
 // API
@@ -52,7 +146,7 @@ char fth_cfetch(int a);
 void fth_cstore(int a, char x);
 char *fth_area(int a, int size);
 
-void fth_init(primitives_f app_primitives);
+void fth_init(primitives_f app_primitives, notfound_f app_notfnd);
 #ifndef FORTH_ONLY_VM
 int fth_interpret(const char *s);
 int fth_execute(const char *w);

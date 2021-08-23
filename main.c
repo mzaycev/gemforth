@@ -70,7 +70,7 @@ primitive_word_t app_words[] = {
 	{"CR",			CR,		0},
 	{"CLOCK",		CLOCK,		0},
 	{".\"",			DOTQUOTE,	1},
-	
+		
 	{NULL,			0,		0}
 };
 #endif
@@ -78,9 +78,11 @@ primitive_word_t app_words[] = {
 
 int main(int argc, char *argv[])
 {
+#ifndef FORTH_ONLY_VM
 	char tib[256];
+#endif
 	
-	fth_init(app_primitives);
+	fth_init(app_primitives, NULL);
 #ifndef FORTH_ONLY_VM
 	fth_library(app_words);
 	
