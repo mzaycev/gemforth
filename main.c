@@ -9,7 +9,7 @@
 
 
 enum app_codes {
-	BYE = APP_PRIM(0),
+	BYE,
 	DOT,
 	DOTX,
 	EMIT,

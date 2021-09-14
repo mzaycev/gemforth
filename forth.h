@@ -27,9 +27,8 @@
 
 
 // Macros
-#define CORE_PRIM_MAX	1000
+#define CORE_PRIM_FIRST	1000
 #define ERROR_MAX	256
-#define APP_PRIM(x)	(CORE_PRIM_MAX + (x))
 #define FORTH_BOOL(x)	((x) ? ~0 : 0)
 
 

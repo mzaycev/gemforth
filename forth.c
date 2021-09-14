@@ -66,7 +66,7 @@
 
 enum core_codes {
 	// control flow
-	LIT = 0,
+	LIT = CORE_PRIM_FIRST,
 	ENTER,
 	EXIT,
 	BRANCH,
