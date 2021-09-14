@@ -48,6 +48,16 @@ typedef struct word {
 } word_t;
 #endif
 
+enum cftype {
+	CFIF,
+	CFELSE,
+	CFTHEN,
+	CFBEGIN,
+	CFWHILE,
+	CFDO,
+	CFLOOP
+};
+
 typedef void (*primitives_f)(int prim);
 typedef int (*notfound_f)(const char *word);
 
@@ -73,15 +83,7 @@ typedef struct forth {
 
 	// control flow stack
 	struct {
-		enum cftype {
-			CFIF,
-			CFELSE,
-			CFTHEN,
-			CFBEGIN,
-			CFWHILE,
-			CFDO,
-			CFLOOP
-		} type;
+		enum cftype type;
 		int ref;
 	} cfstack[CFSTACK_SIZE];
 	int cfsp;
