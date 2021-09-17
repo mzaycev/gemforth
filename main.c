@@ -97,7 +97,7 @@ int main(int argc, char *argv[])
 			return 1;
 		}
 		
-		source = malloc(st.st_size + 1);
+		source = (char *)malloc(st.st_size + 1);
 		if (!source) {
 			perror("Unable to allocate memory for file contents");
 			return 1;
