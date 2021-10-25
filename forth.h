@@ -1,6 +1,9 @@
 #ifndef _FORTH_H_
 #define _FORTH_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Settings
 // Uncomment to build Forth system without text interpreter and dictionary
@@ -178,6 +181,11 @@ int fth_runprogram(const char *fname);
 
 void fth_savedata(const char *fname);
 void fth_loaddata(const char *fname);
+#endif
+
+
+#ifdef __cplusplus
+}
 #endif
 
 
