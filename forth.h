@@ -15,8 +15,8 @@ extern "C" {
 #define CFSTACK_SIZE		16
 #define CODE_INITIAL_SIZE	256		// cells
 #define DATA_INITIAL_SIZE	1024		// bytes
-#define DICT_INITIAL_SIZE	1024		// words
-#define NAMES_INITIAL_SIZE	4096		// bytes
+#define DICT_INITIAL_SIZE	256		// words
+#define NAMES_INITIAL_SIZE	1024		// bytes
 #define WORD_MAX	32			// bytes
 
 

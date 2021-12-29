@@ -1587,13 +1587,13 @@ void fth_init(primitives_f app_primitives, notfound_f app_notfnd)
 	F.app_notfound = app_notfnd;
 	F.code = (int *)malloc(CODE_INITIAL_SIZE * sizeof(int));
 	check(!F.code, "");
-	F.codecap = CODE_INITIAL_SIZE;
+	F.codecap = CODE_INITIAL_SIZE * sizeof(int);
 	F.data = (char *)malloc(DATA_INITIAL_SIZE);
 	check(!F.data, "");
 	F.datacap = DATA_INITIAL_SIZE;
 	F.dict = (word_t *)malloc(DICT_INITIAL_SIZE * sizeof(word_t));
 	check(!F.dict, "");
-	F.dictcap = DICT_INITIAL_SIZE;
+	F.dictcap = DICT_INITIAL_SIZE * sizeof(word_t);
 	F.names = (char *)malloc(NAMES_INITIAL_SIZE);
 	check(!F.names, "");
 	F.namescap = NAMES_INITIAL_SIZE;
