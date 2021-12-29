@@ -716,6 +716,7 @@ static void saveprogram(const char *fname, int entry)
 	check(fwrite(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	check(fwrite(&F.codecomma_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	check(fwrite(&F.store_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.dotry_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	
 	fclose(f);
 }
@@ -1836,6 +1837,7 @@ void fth_savesystem(const char *fname)
 	check(fwrite(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	check(fwrite(&F.codecomma_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	check(fwrite(&F.store_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
+	check(fwrite(&F.dotry_xt, sizeof(int), 1, f) == 0, "save error: %s", strerror(errno));
 	
 	fclose(f);
 }
@@ -1878,6 +1880,7 @@ void fth_loadsystem(const char *fname)
 	check(fread(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	check(fread(&F.codecomma_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	check(fread(&F.store_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.dotry_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
 	fclose(f);
 	fth_reset();
@@ -1930,6 +1933,7 @@ int fth_runprogram(const char *fname)
 	check(fread(&F.doaddloop_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	check(fread(&F.codecomma_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	check(fread(&F.store_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
+	check(fread(&F.dotry_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
 	fclose(f);
 	fth_reset();
