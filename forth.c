@@ -33,24 +33,19 @@
 #define checkcode(a)	check((a) <= 0 || (a) >= CODE_SIZE, "invalid code address %d", (a))
 
 // parsing
-#ifndef FORTH_ONLY_VM
-#  define SOURCELEFT	(F.intp < strlen(F.source))
-#  define CURCHAR	(F.source[F.intp])
-#  define ISSEP(sep, c)	(((sep) == (c)) || ((sep) == ' ' && strchr(" \t\n\r", (c))))
-#endif
+#define SOURCELEFT	(F.intp < strlen(F.source))
+#define CURCHAR		(F.source[F.intp])
+#define ISSEP(sep, c)	(((sep) == (c)) || ((sep) == ' ' && strchr(" \t\n\r", (c))))
 
 // dictionary
 
 // flags
-#ifndef FORTH_ONLY_VM
-#  define FLAG(x)	(1 << (x))
-#  define IMMEDIATE	FLAG(0)
-#  define SMUDGED	FLAG(1)
-#  define SET(x, flag)	((x) |= (flag))
-#  define CLR(x, flag)	((x) &= ~(flag))
-#  define ISSET(x, flag) \
-			(((x) & (flag)) != 0)
-#endif
+#define FLAG(x)		(1 << (x))
+#define IMMEDIATE	FLAG(0)
+#define SMUDGED		FLAG(1)
+#define SET(x, flag)	((x) |= (flag))
+#define CLR(x, flag)	((x) &= ~(flag))
+#define ISSET(x, flag)	(((x) & (flag)) != 0)
 
 // save file marks
 #define SYSTEM_MARK	'S'
@@ -213,7 +208,6 @@ enum core_codes {
 };
 
 
-#ifndef FORTH_ONLY_VM
 primitive_word_t core_words[] = {
 	// control flow
 	{"EXIT",		EXIT,			0},
@@ -349,7 +343,6 @@ primitive_word_t core_words[] = {
 	
 	{NULL,			0,			0}
 };
-#endif
 
 
 // ============================== Forth state =================================
@@ -452,7 +445,6 @@ static void ccompile(int c)
 }
 
 
-#ifndef FORTH_ONLY_VM
 static void scompile(const char *s, int size)
 {
 	int escape = 0;
@@ -508,7 +500,6 @@ static void scompile(const char *s, int size)
 	}
 	ccompile('\0');
 }
-#endif
 
 
 static void execute(int xt)
@@ -526,7 +517,6 @@ static void execute(int xt)
 }
 
 
-#ifndef FORTH_ONLY_VM
 static void create(const char *name, int flags, int prim)
 {
 	int name_size = strlen(name) + 1;
@@ -688,7 +678,7 @@ static void do_interpret(void)
 		}
 	}
 }
-#endif		/* #ifndef FORTH_ONLY_VM */
+
 
 #ifndef FORTH_NO_SAVES
 static void saveprogram(const char *fname, int entry)
@@ -887,7 +877,6 @@ static void core_prims(int prim, int pfa)
 			check(F.lsp <= 1, "attempt to use J without outer loop");
 			push(F.lstack[F.lsp - 2].index);
 			break;
-#ifndef FORTH_ONLY_VM
 		case COLON:
 			check(getword(' ') == 0, "word required for :");
 			create(F.word, SMUDGED, ENTER);
@@ -900,7 +889,6 @@ static void core_prims(int prim, int pfa)
 			CLR(F.dict[F.code[F.current]].flags, SMUDGED);
 			F.state = 0;
 			break;
-#endif
 		case EXECUTE: {
 			int xt = pop();
 			checkcode(xt);
@@ -910,10 +898,8 @@ static void core_prims(int prim, int pfa)
 		case DOTRY: {
 			jmp_buf ojmp;
 			int osp = F.sp, orsp = F.rsp, olsp = F.lsp, oip = F.ip, orunning = F.running;
-#ifndef FORTH_ONLY_VM
 			const char *osource = F.source;
 			int ointp = F.intp, ostate = F.state;
-#endif
 			memcpy(ojmp, F.errjmp, sizeof(jmp_buf));
 			F.errhandlers++;
 			if (setjmp(F.errjmp) == 0) {
@@ -927,17 +913,14 @@ static void core_prims(int prim, int pfa)
 				F.sp = osp, F.rsp = orsp, F.lsp = olsp, F.ip = oip, F.running = orunning;
 				if (F.running)
 					F.ip++;
-#ifndef FORTH_ONLY_VM
 				F.source = osource;
 				F.intp = ointp, F.state = ostate;
-#endif
 				memcpy(F.errjmp, ojmp, sizeof(jmp_buf));
 				F.errhandlers--;
 				push(0);
 			}
 			break;
 		}
-#ifndef FORTH_ONLY_VM
 		case TRY: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for TRY");
@@ -973,7 +956,6 @@ static void core_prims(int prim, int pfa)
 			}
 			break;
 		}
-#endif
 		case ERROR:
 			fth_error("%s", fth_area(fth_pop(), 1));
 			break;
@@ -1204,7 +1186,6 @@ static void core_prims(int prim, int pfa)
 		case DOVARIABLE:
 			push(F.code[pfa]);		// is variable a constant !?!!
 			break;
-#ifndef FORTH_ONLY_VM
 		case CONSTANT:
 			check(getword(' ') == 0, "word required for CONSTANT");
 			create(F.word, 0, DOCONSTANT);
@@ -1217,7 +1198,6 @@ static void core_prims(int prim, int pfa)
 			compile(0);			// xt of DOES>-part
 			dcompile(0);
 			break;
-#endif
 		case DODOES:
 			push(F.code[pfa]);
 			rpush();
@@ -1246,7 +1226,6 @@ static void core_prims(int prim, int pfa)
 		case CCOMMA:
 			ccompile(pop());
 			break;
-#ifndef FORTH_ONLY_VM
 		case CREATE:
 			check(getword(' ') == 0, "word required for CREATE");
 			create(F.word, 0, DOVARIABLE);
@@ -1264,7 +1243,6 @@ static void core_prims(int prim, int pfa)
 				F.state = FORTH_BOOL(1);
 			}
 			break;
-#endif
 		case ADDSTORE: {
 			int a = pop(), x = pop();
 			checkdata(a, sizeof(int));
@@ -1274,7 +1252,6 @@ static void core_prims(int prim, int pfa)
 		case DOVALUE:
 			push(fetch(F.code[pfa]));
 			break;
-#ifndef FORTH_ONLY_VM
 		case VALUE:
 			check(getword(' ') == 0, "word required for VALUE");
 			create(F.word, 0, DOVALUE);
@@ -1296,7 +1273,6 @@ static void core_prims(int prim, int pfa)
 			}
 			break;
 		}
-#endif
 		case HERE:
 			push(F.dp);
 			break;
@@ -1337,7 +1313,6 @@ static void core_prims(int prim, int pfa)
 		case CODECOMMA:
 			compile(pop());
 			break;
-#ifndef FORTH_ONLY_VM
 		case COMPILE: {
 			word_t *w;
 			check(getword(' ') == 0, "word required for COMPILE");
@@ -1397,21 +1372,17 @@ static void core_prims(int prim, int pfa)
 			compile(F.exit_xt);
 			execute(pop());
 			break;
-#endif
 		case LENCODE:
 			push(F.cp);
 			break;
-#ifndef FORTH_ONLY_VM
 		case LENDICT:
 			push(F.dictp);
 			break;
 		case LENNAMES:
 			push(F.namesp);
 			break;
-#endif
 		
 		// parsing, strings and tools
-#ifndef FORTH_ONLY_VM
 		case BLOCKCOMMENT:
 			check(parse(')', NULL, NULL) == 0, "unmatched (");
 			break;
@@ -1439,7 +1410,6 @@ static void core_prims(int prim, int pfa)
 			scompile(&F.source[start], length);
 			break;
 		}
-#endif
 		case DEPTH:
 			push(F.sp);
 			break;
@@ -1459,7 +1429,6 @@ static void core_prims(int prim, int pfa)
 		case BL:
 			push(' ');
 			break;
-#ifndef FORTH_ONLY_VM
 		case STRING: {
 			int sep = pop(), start, length;
 			check(!parse(sep, &start, &length), "string separated by `%c' required for STRING", sep);
@@ -1485,7 +1454,7 @@ static void core_prims(int prim, int pfa)
 		case DEFINITIONS:
 			F.current = F.context;
 			break;
-#  ifndef FORTH_NO_SAVES
+#ifndef FORTH_NO_SAVES
 		case SAVE: {
 			int a = pop();
 			checkdata(a, 1);
@@ -1498,9 +1467,6 @@ static void core_prims(int prim, int pfa)
 			fth_loadsystem(&F.data[a]);
 			break;
 		}
-#  endif	/* FORTH_NO_SAVES */
-#endif		/* FORTH_ONLY_VM */
-#ifndef FORTH_NO_SAVES
 		case SAVEPROGRAM: {
 			int entry = pop();
 			int a = pop();
@@ -1609,7 +1575,6 @@ void fth_init(primitives_f app_primitives, notfound_f app_notfnd)
 	F.errhandlers = 0;
 	
 	// initial vocabulary
-#ifndef FORTH_ONLY_VM
 	F.namesp = 0;
 	F.dictp = 1;
 	F.context = F.current = 0;
@@ -1634,11 +1599,9 @@ void fth_init(primitives_f app_primitives, notfound_f app_notfnd)
 	F.exit_xt = find("EXIT")->xt;
 	F.codecomma_xt = find("CODE,")->xt;
 	F.store_xt = find("!")->xt;
-#endif
 }
 
 
-#ifndef FORTH_ONLY_VM
 void fth_primitive(const char *name, int code, int immediate)
 {
 	create(name, immediate ? IMMEDIATE : 0, code);
@@ -1706,7 +1669,6 @@ int fth_getstate(void)
 {
 	return F.state;
 }
-#endif
 
 
 void fth_reset(void)
@@ -1715,10 +1677,8 @@ void fth_reset(void)
 	F.running = 0;
 	F.errormsg[0] = 0;
 	F.errhandlers = 0;
-#ifndef FORTH_ONLY_VM
 	F.state = 0;
 	F.context = F.current = F.forth_voc;
-#endif
 }
 
 
@@ -1743,7 +1703,6 @@ int fth_getstack(int idx)
 }
 
 
-#ifndef FORTH_ONLY_VM
 const char *fth_geterrorline(int *plen, int *pintp, int *plineno)
 {
 	int line = 1, beg = 0, end, i;
@@ -1808,7 +1767,7 @@ const char *fth_gettrace(int idx)
 }
 
 
-#  ifndef FORTH_NO_SAVES
+#ifndef FORTH_NO_SAVES
 void fth_savesystem(const char *fname)
 {
 	char sig[4] = {SYSTEM_MARK, endian(), sizeof(int), 0};
@@ -1894,11 +1853,8 @@ void fth_saveprogram(const char *fname, const char *entry)
 	check(w == NULL, "%s ?", entry);
 	saveprogram(fname, w->xt);
 }
-#  endif	/* FORTH_NO_SAVES */
-#endif		/* FORTH_ONLY_VM */
 
 
-#ifndef FORTH_NO_SAVES
 int fth_runprogram(const char *fname)
 {
 	char sig[4];
@@ -1988,6 +1944,7 @@ void fth_loaddata(const char *fname)
 	
 	fclose(f);
 }
+
 #endif
 
 

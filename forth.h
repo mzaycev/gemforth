@@ -6,11 +6,8 @@ extern "C" {
 #endif
 
 // Settings
-// Uncomment to build Forth system without text interpreter and dictionary
-// #define FORTH_ONLY_VM	1
-// Uncomment to disable Forth system saving and loading capabilities
+// Uncomment to disable Forth system saving and loading capabilities via stdio
 // #define FORTH_NO_SAVES	1
-// Do not uncomment both of above at one time
 
 #define STACK_SIZE	32
 #define RSTACK_SIZE	32
@@ -18,11 +15,9 @@ extern "C" {
 #define CFSTACK_SIZE	16
 #define CODE_SIZE	32768			// cells
 #define DATA_SIZE	32768			// bytes
-#ifndef FORTH_ONLY_VM
-#  define DICT_SIZE	1024			// words
-#  define NAMES_SIZE	8192			// bytes
-#  define WORD_MAX	32			// bytes
-#endif
+#define DICT_SIZE	1024			// words
+#define NAMES_SIZE	8192			// bytes
+#define WORD_MAX	32			// bytes
 
 
 // Includes
@@ -36,7 +31,6 @@ extern "C" {
 
 
 // Types
-#ifndef FORTH_ONLY_VM
 typedef struct primitive_word {
 	const char *name;
 	int code;
@@ -49,7 +43,6 @@ typedef struct word {
 	int name;
 	char flags;
 } word_t;
-#endif
 
 enum cftype {
 	CFIF,
@@ -109,7 +102,6 @@ typedef struct forth {
 	char data[DATA_SIZE + 1];	// with trailing 0
 	int dp;
 
-#ifndef FORTH_ONLY_VM
 	// dictionary area
 	word_t dict[DICT_SIZE];
 	int dictp;
@@ -118,17 +110,14 @@ typedef struct forth {
 	// names area
 	char names[NAMES_SIZE];
 	int namesp;
-#endif
 
 	// state
 	int ip;
 	int running;
-#ifndef FORTH_ONLY_VM
 	int state;
 	const char *source;
 	int intp;
 	char word[WORD_MAX];
-#endif
 
 	// core xt
 	int lit_xt, exit_xt, branch_xt, qbranch_xt, dodo_xt, doqdo_xt, doloop_xt, doaddloop_xt, codecomma_xt, store_xt, dotry_xt;
@@ -151,31 +140,25 @@ void fth_cstore(int a, char x);
 char *fth_area(int a, int size);
 
 void fth_init(primitives_f app_primitives, notfound_f app_notfnd);
-#ifndef FORTH_ONLY_VM
 int fth_interpret(const char *s);
 int fth_execute(const char *w);
 void fth_primitive(const char *name, int code, int immediate);
 void fth_library(primitive_word_t *lib);
-#endif
 
 void fth_reset(void);
 const char *fth_geterror(void);
 int fth_getdepth(void);
 int fth_getstack(int idx);
-#ifndef FORTH_ONLY_VM
 int fth_getstate(void);
 const char *fth_geterrorline(int *plen, int *pintp, int *plineno);
 int fth_gettracedepth(void);
 const char *fth_gettrace(int idx);
-#endif
 
 #ifndef FORTH_NO_SAVES
-#  ifndef FORTH_ONLY_VM
 void fth_savesystem(const char *fname);
 void fth_loadsystem(const char *fname);
 
 void fth_saveprogram(const char *fname, const char *entry);
-#  endif
 
 int fth_runprogram(const char *fname);
 

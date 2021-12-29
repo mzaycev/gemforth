@@ -46,12 +46,10 @@ void app_primitives(int prim)
 		case CLOCK:
 			fth_push(clock());
 			break;
-#ifndef FORTH_ONLY_VM
 		case DOTQUOTE:
 			fth_execute("\"");
 			fth_interpret("PRINT");
 			break;
-#endif
 		
 		default:
 			fth_error("invalid opcode: %d", prim);
@@ -60,7 +58,6 @@ void app_primitives(int prim)
 }
 
 
-#ifndef FORTH_ONLY_VM
 primitive_word_t app_words[] = {
 	{"BYE",			BYE,		0},
 	{".",			DOT,		0},
@@ -73,17 +70,13 @@ primitive_word_t app_words[] = {
 		
 	{NULL,			0,		0}
 };
-#endif
 
 
 int main(int argc, char *argv[])
 {
-#ifndef FORTH_ONLY_VM
 	char tib[256];
-#endif
 	
 	fth_init(app_primitives, NULL);
-#ifndef FORTH_ONLY_VM
 	fth_library(app_words);
 	
 	if (argc > 1) {
@@ -178,23 +171,6 @@ int main(int argc, char *argv[])
 				fth_reset();
 			}
 		}
-#else
-	if (argc < 2) {
-		fprintf(stderr, "Usage: %s PROGRAM.BIN\n", argv[0]);
-		return EXIT_FAILURE;
-	}
-	
-	if (!fth_runprogram(argv[1])) {
-		int i;
-		
-		fprintf(stderr, "%s\n", fth_geterror());
-				
-		fprintf(stderr, "Stack: ");
-		for (i = 0; i < fth_getdepth(); i++)
-			fprintf(stderr, "%d ", fth_getstack(i));
-		fprintf(stderr, "\n");
-	}
-#endif
 	
 	return 0;
 }
