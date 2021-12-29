@@ -9,14 +9,14 @@ extern "C" {
 // Uncomment to disable Forth system saving and loading capabilities via stdio
 // #define FORTH_NO_SAVES	1
 
-#define STACK_SIZE	32
-#define RSTACK_SIZE	32
-#define LSTACK_SIZE	16
-#define CFSTACK_SIZE	16
-#define CODE_SIZE	32768			// cells
-#define DATA_SIZE	32768			// bytes
-#define DICT_SIZE	1024			// words
-#define NAMES_SIZE	8192			// bytes
+#define STACK_SIZE		32
+#define RSTACK_SIZE		32
+#define LSTACK_SIZE		16
+#define CFSTACK_SIZE		16
+#define CODE_INITIAL_SIZE	256		// cells
+#define DATA_INITIAL_SIZE	1024		// bytes
+#define DICT_INITIAL_SIZE	1024		// words
+#define NAMES_INITIAL_SIZE	4096		// bytes
 #define WORD_MAX	32			// bytes
 
 
@@ -95,21 +95,21 @@ typedef struct forth {
 	notfound_f app_notfound;
 
 	// code area
-	int code[CODE_SIZE];
-	int cp;
+	int *code;
+	int cp, codecap;
 
 	// data area
-	char data[DATA_SIZE + 1];	// with trailing 0
-	int dp;
+	char *data;
+	int dp, datacap;
 
 	// dictionary area
-	word_t dict[DICT_SIZE];
-	int dictp;
+	word_t *dict;
+	int dictp, dictcap;
 	int context, current, forth_voc;
 
 	// names area
-	char names[NAMES_SIZE];
-	int namesp;
+	char *names;
+	int namesp, namescap;
 
 	// state
 	int ip;
@@ -140,6 +140,7 @@ void fth_cstore(int a, char x);
 char *fth_area(int a, int size);
 
 void fth_init(primitives_f app_primitives, notfound_f app_notfnd);
+void fth_free(void);
 int fth_interpret(const char *s);
 int fth_execute(const char *w);
 void fth_primitive(const char *name, int code, int immediate);

@@ -28,9 +28,9 @@
 #define check(cond, ...) \
 			if (cond) error(__VA_ARGS__)
 #define invaliddataaddr(a) \
-			((a) <= 0 || (a) >= DATA_SIZE)
+			((a) <= 0 || (a) >= F.datacap)
 #define checkdata(a, s)	check(invaliddataaddr(a) || invaliddataaddr((a) + (s)), "invalid data area %d (%d bytes)", (a), (s))
-#define checkcode(a)	check((a) <= 0 || (a) >= CODE_SIZE, "invalid code address %d", (a))
+#define checkcode(a)	check((a) <= 0 || (a) >= F.codecap, "invalid code address %d", (a))
 
 // parsing
 #define SOURCELEFT	(F.intp < strlen(F.source))
@@ -423,16 +423,34 @@ static enum cftype cfpeek(void)
 }
 
 
+static int reserve(void **area, int *size, int p, int required)
+{
+	void *newarea;
+	int newsize = *size;
+	
+	while (p + required > newsize) {
+		newsize *= 2;
+		newarea = realloc(*area, newsize);
+		if (!newarea)
+			return 0;
+		*area = newarea;
+		*size = newsize;
+		(*(char **)area)[newsize - 1] = 0;
+	}
+	return 1;
+}
+
+
 static void compile(int x)
 {
-	check(F.cp >= CODE_SIZE, "code area overflow");
+	check(!reserve((void **)&F.code, &F.codecap, F.cp * sizeof(int), sizeof(int)), "unable to expand code area");
 	F.code[F.cp++] = x;
 }
 
 
 static void dcompile(int x)
 {
-	checkdata(F.dp, sizeof(int));
+	check(!reserve((void **)&F.data, &F.datacap, F.dp, sizeof(int)), "unable to expand data area");
 	*(int *)&F.data[F.dp] = x;
 	F.dp += sizeof(int);
 }
@@ -440,7 +458,7 @@ static void dcompile(int x)
 
 static void ccompile(int c)
 {
-	checkdata(F.dp, 1);
+	check(!reserve((void **)&F.data, &F.datacap, F.dp, 1), "unable to expand data area");
 	F.data[F.dp++] = c;
 }
 
@@ -521,10 +539,8 @@ static void create(const char *name, int flags, int prim)
 {
 	int name_size = strlen(name) + 1;
 	
-	check(F.dictp >= DICT_SIZE - 1,
-		"dictionary overflow while creating %s", name);
-	check(F.namesp + name_size >= NAMES_SIZE,
-		"name area overflow while creating %s", name);
+	check(!reserve((void **)&F.dict, &F.dictcap, F.dictp * sizeof(int), sizeof(word_t)), "unable to expand dictionary area while creating %s", name);
+	check(!reserve((void **)&F.names, &F.namescap, F.namesp, name_size), "unable to expand names area while creating %s", name);
 	F.dict[F.dictp].link = F.code[F.current];
 	F.code[F.current] = F.dictp;
 	F.dict[F.dictp].flags = flags;
@@ -1278,7 +1294,7 @@ static void core_prims(int prim, int pfa)
 			break;
 		case ALLOT: {
 			int size = pop();
-			checkdata(F.dp, size);
+			check(!reserve((void **)&F.data, &F.datacap, F.dp, size), "unable to expand data area while ALLOTing %d bytes", size);
 			F.dp += size;
 			break;
 		}
@@ -1438,7 +1454,7 @@ static void core_prims(int prim, int pfa)
 		}
 		case WORD:
 			check(getword(pop()) == 0, "word required for WORD");
-			checkdata(F.dp, strlen(F.word) + 1);
+			check(!reserve((void **)&F.dp, &F.datacap, F.dp, strlen(F.word) + 1), "unable to expand data area while placing word %s", F.word);
 			strcpy(&F.data[F.dp], F.word);
 			push(F.dp);
 			break;
@@ -1569,7 +1585,19 @@ void fth_init(primitives_f app_primitives, notfound_f app_notfnd)
 {
 	F.app_prims = app_primitives;
 	F.app_notfound = app_notfnd;
-	F.data[DATA_SIZE] = '\0';
+	F.code = (int *)malloc(CODE_INITIAL_SIZE * sizeof(int));
+	check(!F.code, "");
+	F.codecap = CODE_INITIAL_SIZE;
+	F.data = (char *)malloc(DATA_INITIAL_SIZE);
+	check(!F.data, "");
+	F.datacap = DATA_INITIAL_SIZE;
+	F.dict = (word_t *)malloc(DICT_INITIAL_SIZE * sizeof(word_t));
+	check(!F.dict, "");
+	F.dictcap = DICT_INITIAL_SIZE;
+	F.names = (char *)malloc(NAMES_INITIAL_SIZE);
+	check(!F.names, "");
+	F.namescap = NAMES_INITIAL_SIZE;
+	F.data[DATA_INITIAL_SIZE - 1] = '\0';
 	reset();
 	F.cp = F.dp = 1;		// 0 is an "invalid" address
 	F.errhandlers = 0;
@@ -1599,6 +1627,15 @@ void fth_init(primitives_f app_primitives, notfound_f app_notfnd)
 	F.exit_xt = find("EXIT")->xt;
 	F.codecomma_xt = find("CODE,")->xt;
 	F.store_xt = find("!")->xt;
+}
+
+
+void fth_free(void)
+{
+	free(F.code);
+	free(F.data);
+	free(F.dict);
+	free(F.names);
 }
 
 
@@ -1816,16 +1853,16 @@ void fth_loadsystem(const char *fname)
 	check(sig[3] != 0, "signature reserved byte is non-zero");
 	
 	check(fread(&F.cp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.cp > CODE_SIZE, "saved code (%d B) is larger than code area (%d B)", F.cp, CODE_SIZE);
+	check(!reserve((void **)&F.code, &F.codecap, F.cp * sizeof(int), 0), "unable to expand code area for loading system state");
 	check(fread(F.code, sizeof(int), F.cp, f) < F.cp, "load error: %s", strerror(errno));
 	check(fread(&F.dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", F.dp, DATA_SIZE);
+	check(!reserve((void **)&F.data, &F.datacap, F.dp, 0), "unable to expand data area for loading system state");
 	check(fread(F.data, 1, F.dp, f) < F.dp, "load error: %s", strerror(errno));
 	check(fread(&F.dictp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.dictp > DICT_SIZE, "saved dictionary (%d words) is larger than dictionary area (%d B)", F.dictp, DICT_SIZE);
+	check(!reserve((void **)&F.dict, &F.dictcap, F.dictp * sizeof(word_t), 0), "unable to expand dictionary area for loading system state");
 	check(fread(F.dict, sizeof(word_t), F.dictp, f) < F.dictp, "load error: %s", strerror(errno));
 	check(fread(&F.namesp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.namesp > NAMES_SIZE, "saved word names (%d B) is larger than names area (%d B)", F.namesp, NAMES_SIZE);
+	check(!reserve((void **)&F.names, &F.namescap, F.namesp, 0), "unable to expand names area for loading system state");
 	check(fread(F.names, 1, F.namesp, f) < F.namesp, "load error: %s", strerror(errno));
 	check(fread(&F.forth_voc, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	
@@ -1873,10 +1910,10 @@ int fth_runprogram(const char *fname)
 	
 	check(fread(&entry, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
 	check(fread(&F.cp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.cp > CODE_SIZE, "saved code (%d B) is larger than code area (%d B)", F.cp, CODE_SIZE);
+	check(!reserve((void **)&F.code, &F.codecap, F.cp * sizeof(int), 0), "unable to expand code area for loading system state");
 	check(fread(F.code, sizeof(int), F.cp, f) < F.cp, "load error: %s", strerror(errno));
 	check(fread(&F.dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", F.dp, DATA_SIZE);
+	check(!reserve((void **)&F.data, &F.datacap, F.dp, 0), "unable to expand data area for loading system state");
 	check(fread(F.data, 1, F.dp, f) < F.dp, "load error: %s", strerror(errno));
 	
 	check(fread(&F.lit_xt, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
@@ -1939,7 +1976,7 @@ void fth_loaddata(const char *fname)
 	check(sig[3] != 0, "signature reserved byte is non-zero");
 	
 	check(fread(&F.dp, sizeof(int), 1, f) == 0, "load error: %s", strerror(errno));
-	check(F.dp > DATA_SIZE, "saved data (%d B) is larger than data area (%d B)", F.dp, DATA_SIZE);
+	check(!reserve((void **)&F.data, &F.datacap, F.dp, 0), "unable to expand data area for loading data");
 	check(fread(F.data, 1, F.dp, f) < F.dp, "load error: %s", strerror(errno));
 	
 	fclose(f);
