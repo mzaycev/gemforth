@@ -8,6 +8,8 @@ extern "C" {
 // Settings
 // Uncomment to disable Forth system saving and loading capabilities via stdio
 // #define FORTH_NO_SAVES	1
+// Uncomment to enable workaround for alignment issues while accessing data area
+// #define FORTH_ALIGNMENT_HACK	1
 
 #define STACK_SIZE		32
 #define RSTACK_SIZE		32
@@ -25,9 +27,9 @@ extern "C" {
 
 
 // Macros
-#define CORE_PRIM_FIRST	1000
-#define ERROR_MAX	256
-#define FORTH_BOOL(x)	((x) ? ~0 : 0)
+#define CORE_PRIM_FIRST		1000
+#define ERROR_MAX		256
+#define FORTH_BOOL(x)		((x) ? ~0 : 0)
 
 
 // Types

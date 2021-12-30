@@ -451,7 +451,11 @@ static void compile(int x)
 static void dcompile(int x)
 {
 	check(!reserve((void **)&F.data, &F.datacap, F.dp, sizeof(int)), "unable to expand data area");
+#ifdef FORTH_ALIGNMENT_HACK
+	memcpy(&F.data[F.dp], &x, sizeof(int));
+#else
 	*(int *)&F.data[F.dp] = x;
+#endif
 	F.dp += sizeof(int);
 }
 
@@ -1260,9 +1264,8 @@ static void core_prims(int prim, int pfa)
 			}
 			break;
 		case ADDSTORE: {
-			int a = pop(), x = pop();
-			checkdata(a, sizeof(int));
-			*(int *)&F.data[a] += x;
+			int a = pop();
+			store(a, fetch(a) + pop());
 			break;
 		}
 		case DOVALUE:
@@ -1548,15 +1551,26 @@ int fth_pop(void)
 
 int fth_fetch(int a)
 {
+#ifdef FORTH_ALIGNMENT_HACK
+	int x;
+	checkdata(a, sizeof(int));
+	memcpy(&x, &F.data[a], sizeof(int));
+	return x;
+#else
 	checkdata(a, sizeof(int));
 	return *(int *)&F.data[a];
+#endif
 }
 
 
 void fth_store(int a, int x)
 {
 	checkdata(a, sizeof(int));
+#ifdef FORTH_ALIGNMENT_HACK
+	memcpy(&F.data[a], &x, sizeof(int));
+#else
 	*(int *)&F.data[a] = x;
+#endif
 }
 
 
