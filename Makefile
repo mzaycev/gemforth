@@ -21,7 +21,7 @@ clean:
 	rm -f $(EXE)
 
 work_blob:
-	7za a blobs/newforth_`date +%Y%m%d`w.zip $(SRC) forth.h $(EXE) Makefile README.txt internals.txt
+	7za a blobs/gemforth_`date +%Y%m%d`w.zip $(SRC) forth.h $(EXE) Makefile README.txt internals.txt
 
 home_blob:
-	7za a blobs/newforth_`date +%Y%m%d`h.zip $(SRC) forth.h $(EXE) Makefile README.txt internals.txt
+	7za a blobs/gemforth_`date +%Y%m%d`h.zip $(SRC) forth.h $(EXE) Makefile README.txt internals.txt
